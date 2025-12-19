@@ -407,6 +407,63 @@
       </div>
     </div>
 
+    <!-- 编辑快捷方式弹窗 -->
+    <div class="modal" id="editShortcutModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-edit"></i> 编辑快捷方式</h3>
+          <button class="close-btn" id="closeEditModalBtn">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>名称</label>
+            <input type="text" id="editShortcutName" placeholder="网站名称">
+          </div>
+          <div class="form-group">
+            <label>网址</label>
+            <input type="text" id="editShortcutUrl" placeholder="https://example.com">
+          </div>
+          
+          <!-- 图标设置 -->
+          <div class="form-group">
+            <label>图标设置</label>
+            <div class="icon-settings">
+              <div class="icon-preview">
+                <img id="editIconPreview" src="" alt="图标预览">
+                <div class="icon-fallback" id="editIconFallback">?</div>
+              </div>
+              <div class="icon-controls">
+                <div class="icon-upload">
+                  <input type="file" id="iconUpload" accept="image/*" style="display: none;">
+                  <button type="button" id="uploadIconBtn" class="btn btn-secondary">
+                    <i class="fas fa-upload"></i> 上传图标
+                  </button>
+                </div>
+                <div class="icon-color">
+                  <label>图标颜色</label>
+                  <input type="color" id="editIconColor" value="#667eea">
+                </div>
+              </div>
+            </div>
+            <div class="icon-options">
+              <button type="button" id="useDefaultIconBtn" class="btn btn-outline">
+                <i class="fas fa-globe"></i> 使用默认图标
+              </button>
+              <button type="button" id="removeCustomIconBtn" class="btn btn-outline">
+                <i class="fas fa-trash"></i> 移除自定义图标
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelEditShortcutBtn">取消</button>
+          <button class="btn btn-primary" id="saveEditShortcutBtn">保存</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 添加书签弹窗 -->
     <div class="modal" id="bookmarkModal">
       <div class="modal-content">

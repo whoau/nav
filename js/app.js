@@ -42,6 +42,34 @@ const App = {
     this.data = await Storage.getAll();
     this.applySettings(this.data.settings);
     Widgets.applyWidgetSettings(this.data.settings);
+    
+    // 迁移快捷方式数据以确保兼容性
+    await this.migrateShortcutsData();
+  },
+  
+  // 迁移快捷方式数据
+  async migrateShortcutsData() {
+    let shortcuts = this.data.shortcuts || [];
+    let hasChanges = false;
+    
+    shortcuts = shortcuts.map(shortcut => {
+      // 如果快捷方式缺少新的属性，添加默认值
+      if (!shortcut.hasOwnProperty('icon')) {
+        shortcut.icon = 'default';
+        hasChanges = true;
+      }
+      if (!shortcut.hasOwnProperty('color')) {
+        shortcut.color = '';
+        hasChanges = true;
+      }
+      return shortcut;
+    });
+    
+    // 如果有变更，保存更新后的数据
+    if (hasChanges) {
+      await Storage.set('shortcuts', shortcuts);
+      this.data.shortcuts = shortcuts;
+    }
   },
 
   // 初始化壁纸库
@@ -435,14 +463,26 @@ const App = {
         const iconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
         const initial = shortcut.name.charAt(0).toUpperCase();
         
+        const hasCustomIcon = shortcut.icon && shortcut.icon !== 'default';
+        const customColor = shortcut.color || '';
+        const hasCustomDataIcon = shortcut.icon && shortcut.icon.startsWith('data:');
+        
         return `
-          <a href="${shortcut.url}" class="shortcut-item" data-index="${index}" draggable="true">
+          <a href="${shortcut.url}" class="shortcut-item" data-index="${index}" data-has-custom-icon="${hasCustomDataIcon}" draggable="true" ${customColor ? `style="--shortcut-icon-color: ${customColor}"` : ''}>
+            <button class="shortcut-edit" data-index="${index}">
+              <i class="fas fa-edit"></i>
+            </button>
             <button class="shortcut-delete" data-index="${index}">
               <i class="fas fa-times"></i>
             </button>
             <div class="shortcut-icon">
-              <img src="${iconUrl}" alt="${shortcut.name}" 
-                   onerror="this.parentElement.innerHTML='<div class=\\'shortcut-icon-fallback\\'>${initial}</div>';">
+              ${hasCustomDataIcon 
+                ? `<img src="${shortcut.icon}" alt="${shortcut.name}"><div class="shortcut-icon-fallback" style="display: none;">${initial}</div>`
+                : hasCustomIcon
+                  ? `<div class="shortcut-icon-fallback">${initial}</div>`
+                  : `<img src="${iconUrl}" alt="${shortcut.name}" 
+                     onerror="this.parentElement.innerHTML='<div class=\\'shortcut-icon-fallback\\'>${initial}</div>';">`
+              }
             </div>
             <span class="shortcut-name">${shortcut.name}</span>
           </a>
@@ -458,6 +498,8 @@ const App = {
     // 删除快捷方式
     grid.addEventListener('click', async (e) => {
       const deleteBtn = e.target.closest('.shortcut-delete');
+      const editBtn = e.target.closest('.shortcut-edit');
+      
       if (deleteBtn) {
         e.preventDefault();
         e.stopPropagation();
@@ -465,6 +507,13 @@ const App = {
         shortcuts.splice(index, 1);
         await Storage.set('shortcuts', shortcuts);
         renderShortcuts();
+      }
+      
+      if (editBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const index = parseInt(editBtn.dataset.index);
+        openEditModal(index);
       }
     });
 
@@ -521,6 +570,189 @@ const App = {
       urlInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && saveBtn) {
           saveBtn.click();
+        }
+      });
+    }
+
+    // ==================== 编辑功能 ====================
+    const editModal = document.getElementById('editShortcutModal');
+    const editNameInput = document.getElementById('editShortcutName');
+    const editUrlInput = document.getElementById('editShortcutUrl');
+    const editIconColorInput = document.getElementById('editIconColor');
+    const iconUploadInput = document.getElementById('iconUpload');
+    const iconPreview = document.getElementById('editIconPreview');
+    const iconFallback = document.getElementById('editIconFallback');
+    const uploadIconBtn = document.getElementById('uploadIconBtn');
+    const useDefaultIconBtn = document.getElementById('useDefaultIconBtn');
+    const removeCustomIconBtn = document.getElementById('removeCustomIconBtn');
+    const closeEditModalBtn = document.getElementById('closeEditModalBtn');
+    const cancelEditShortcutBtn = document.getElementById('cancelEditShortcutBtn');
+    const saveEditShortcutBtn = document.getElementById('saveEditShortcutBtn');
+    
+    let editingIndex = -1;
+    let customIconData = null;
+    
+    // 打开编辑模态框
+    const openEditModal = (index) => {
+      editingIndex = index;
+      const shortcut = shortcuts[index];
+      
+      // 填充表单数据
+      editNameInput.value = shortcut.name || '';
+      editUrlInput.value = shortcut.url || '';
+      editIconColorInput.value = shortcut.color || '#667eea';
+      customIconData = shortcut.icon && shortcut.icon.startsWith('data:') ? shortcut.icon : null;
+      
+      // 更新图标预览
+      updateIconPreview(shortcut);
+      
+      // 显示模态框
+      editModal?.classList.add('show');
+      editNameInput.focus();
+    };
+    
+    // 更新图标预览
+    const updateIconPreview = (shortcut) => {
+      const hasCustomIcon = shortcut.icon && shortcut.icon !== 'default';
+      const initial = shortcut.name ? shortcut.name.charAt(0).toUpperCase() : '?';
+      
+      if (hasCustomIcon && shortcut.icon.startsWith('data:')) {
+        // 自定义上传的图标
+        iconPreview.src = shortcut.icon;
+        iconPreview.style.display = 'block';
+        iconFallback.style.display = 'none';
+        iconPreview.onload = () => {
+          // 如果图标加载成功，隐藏fallback
+          iconFallback.style.display = 'none';
+        };
+        iconPreview.onerror = () => {
+          // 如果图标加载失败，显示fallback
+          iconPreview.style.display = 'none';
+          iconFallback.style.display = 'flex';
+          iconFallback.textContent = initial;
+          iconFallback.style.background = shortcut.color || 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
+        };
+      } else {
+        // 使用默认图标或网站favicon
+        iconPreview.style.display = 'none';
+        iconFallback.style.display = 'flex';
+        iconFallback.textContent = initial;
+        iconFallback.style.background = shortcut.color || 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
+      }
+    };
+    
+    // 上传图标
+    if (uploadIconBtn && iconUploadInput) {
+      uploadIconBtn.addEventListener('click', () => {
+        iconUploadInput.click();
+      });
+      
+      iconUploadInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file && file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            customIconData = event.target.result;
+            iconPreview.src = customIconData;
+            iconPreview.style.display = 'block';
+            iconFallback.style.display = 'none';
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+    
+    // 使用默认图标
+    if (useDefaultIconBtn) {
+      useDefaultIconBtn.addEventListener('click', () => {
+        customIconData = null;
+        iconPreview.style.display = 'none';
+        iconFallback.style.display = 'flex';
+        iconFallback.textContent = editNameInput.value ? editNameInput.value.charAt(0).toUpperCase() : '?';
+        iconFallback.style.background = 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
+      });
+    }
+    
+    // 移除自定义图标
+    if (removeCustomIconBtn) {
+      removeCustomIconBtn.addEventListener('click', () => {
+        customIconData = null;
+        iconUploadInput.value = ''; // 清空文件输入
+        iconPreview.style.display = 'none';
+        iconPreview.src = '';
+        iconFallback.style.display = 'flex';
+        iconFallback.textContent = editNameInput.value ? editNameInput.value.charAt(0).toUpperCase() : '?';
+        iconFallback.style.background = editIconColorInput.value || 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
+      });
+    }
+    
+    // 关闭编辑模态框
+    const closeEditModal = () => {
+      editModal?.classList.remove('show');
+      editingIndex = -1;
+      customIconData = null;
+      iconUploadInput.value = ''; // 清空文件输入
+    };
+    
+    if (closeEditModalBtn) closeEditModalBtn.addEventListener('click', closeEditModal);
+    if (cancelEditShortcutBtn) cancelEditShortcutBtn.addEventListener('click', closeEditModal);
+    if (editModal) {
+      editModal.addEventListener('click', (e) => {
+        if (e.target === editModal) closeEditModal();
+      });
+    }
+    
+    // 保存编辑
+    if (saveEditShortcutBtn) {
+      saveEditShortcutBtn.addEventListener('click', async () => {
+        const name = editNameInput.value.trim();
+        let url = editUrlInput.value.trim();
+        const color = editIconColorInput.value;
+        
+        if (!name || !url) {
+          alert('请填写名称和网址');
+          return;
+        }
+        
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = 'https://' + url;
+        }
+        
+        // 更新快捷方式
+        const updatedShortcut = { name, url };
+        
+        // 如果有自定义图标，保存图标数据
+        if (customIconData) {
+          updatedShortcut.icon = customIconData;
+        } else {
+          updatedShortcut.icon = 'default';
+        }
+        
+        // 保存颜色
+        if (color) {
+          updatedShortcut.color = color;
+        }
+        
+        shortcuts[editingIndex] = updatedShortcut;
+        await Storage.set('shortcuts', shortcuts);
+        renderShortcuts();
+        closeEditModal();
+      });
+    }
+    
+    // 实时更新预览
+    if (editNameInput) {
+      editNameInput.addEventListener('input', () => {
+        if (iconFallback.style.display !== 'none') {
+          iconFallback.textContent = editNameInput.value ? editNameInput.value.charAt(0).toUpperCase() : '?';
+        }
+      });
+    }
+    
+    if (editIconColorInput) {
+      editIconColorInput.addEventListener('input', () => {
+        if (iconFallback.style.display !== 'none') {
+          iconFallback.style.background = editIconColorInput.value;
         }
       });
     }
