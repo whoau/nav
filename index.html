@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mytab</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/mytab-32.png">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 背景 -->
+    <div id="background">
+      <div class="bg-overlay"></div>
+    </div>
+    
+    <!-- 壁纸控制按钮组 -->
+
+<div class="wallpaper-controls" id="wallpaperControls">
+  <button class="wallpaper-btn" id="prevWallpaperBtn" title="上一张">
+    <i class="fas fa-chevron-left"></i>
+  </button>
+  <button class="wallpaper-btn" id="refreshBgBtn" title="随机换一张">
+    <i class="fas fa-random"></i>
+  </button>
+  <button class="wallpaper-btn" id="nextWallpaperBtn" title="下一张">
+    <i class="fas fa-chevron-right"></i>
+  </button>
+</div>
+
+<!-- 壁纸信息 -->
+<div id="bgInfo" class="bg-info"></div>
+
+    <!-- 壁纸信息 -->
+    <div id="bgInfo" class="bg-info"></div>
+    
+    <!-- 顶部工具栏 -->
+    <header class="top-bar">
+      <div class="left-section">
+        <span id="clock" class="clock"></span>
+        <span id="date" class="date"></span>
+      </div>
+      <div class="right-section">
+        <button id="settingsBtn" class="icon-btn" title="设置">
+          <i class="fas fa-cog"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 问候语 -->
+      <div class="greeting" id="greeting"></div>
+      
+      <!-- 搜索框 -->
+      <div class="search-container">
+        <div class="search-box">
+          <div class="search-engine-selector" id="engineSelector">
+            <img id="currentEngineIcon" src="" alt="搜索引擎">
+            <i class="fas fa-chevron-down"></i>
+          </div>
+          <input type="text" id="searchInput" placeholder="搜索或输入网址" autocomplete="off">
+          <button id="searchBtn" class="search-btn">
+            <i class="fas fa-search"></i>
+          </button>
+        </div>
+        <!-- 搜索引擎下拉菜单 -->
+        <div class="engine-dropdown" id="engineDropdown">
+          <div class="engine-option" data-engine="google">
+            <img src="https://www.google.com/favicon.ico" alt="Google">
+            <span>Google</span>
+          </div>
+          <div class="engine-option" data-engine="baidu">
+            <img src="https://www.baidu.com/favicon.ico" alt="百度">
+            <span>百度</span>
+          </div>
+          <div class="engine-option" data-engine="bing">
+            <img src="https://www.bing.com/favicon.ico" alt="Bing">
+            <span>Bing</span>
+          </div>
+          <div class="engine-option" data-engine="duckduckgo">
+            <img src="https://duckduckgo.com/favicon.ico" alt="DuckDuckGo">
+            <span>DuckDuckGo</span>
+          </div>
+          <div class="engine-option" data-engine="yandex">
+            <img src="https://yandex.com/favicon.ico" alt="Yandex">
+            <span>Yandex</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 快捷方式网格 -->
+      <div class="shortcuts-container">
+        <div class="shortcuts-grid" id="shortcutsGrid"></div>
+        <button class="add-shortcut-btn" id="addShortcutBtn">
+          <i class="fas fa-plus"></i>
+          <span>添加快捷方式</span>
+        </button>
+      </div>
+
+      <!-- 每日名言小组件 -->
+      <div class="proverb-simple" id="proverbWidget">
+        <div class="proverb-simple-headline">
+          <div class="proverb-title">
+          </div>
+          <button class="proverb-refresh-btn" id="refreshProverbBtn" title="刷新谚语" type="button">
+            <i class="fas fa-arrows-rotate"></i>
+          </button>
+        </div>
+        <div class="proverb-simple-content" id="proverbContent">
+          <div class="proverb-loading">
+            <i class="fas fa-circle-notch fa-spin"></i>
+            <span>加载中...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 小组件区域 -->
+      <div class="widgets-container" id="widgetsContainer">
+        <!-- 天气小组件 -->
+        <div class="widget weather-widget" id="weatherWidget">
+          <div class="widget-header">
+            <i class="fas fa-cloud-sun"></i>
+            <span>天气</span>
+            <button class="widget-header-btn" id="refreshWeather" title="刷新">
+              <i class="fas fa-redo"></i>
+            </button>
+          </div>
+          <div class="widget-content" id="weatherContent">
+            <div class="weather-loading">
+              <i class="fas fa-circle-notch fa-spin"></i>
+              <span>定位中...</span>
+            </div>
+          </div>
+        </div>
+        <!-- 网页游戏小组件 -->
+        <div class="widget games-widget" id="gamesWidget">
+          <div class="widget-header">
+            <i class="fas fa-gamepad"></i>
+            <span>网页游戏</span>
+          </div>
+          <div class="widget-content" id="gamesContent"></div>
+        </div>
+
+        <!-- 每日热榜小组件 -->
+
+        <!-- 待办事项小组件 -->
+        <div class="widget todo-widget" id="todoWidget">
+          <div class="widget-header">
+            <i class="fas fa-tasks"></i>
+            <span>待办事项</span>
+            <span class="todo-count" id="todoCount">0</span>
+          </div>
+          <div class="widget-content">
+            <div class="todo-input-container">
+              <input type="text" id="todoInput" placeholder="添加待办事项...">
+              <button id="addTodoBtn"><i class="fas fa-plus"></i></button>
+            </div>
+            <ul class="todo-list" id="todoList"></ul>
+          </div>
+        </div>
+
+        <!-- 书签小组件 -->
+        <div class="widget bookmarks-widget" id="bookmarksWidget">
+          <div class="widget-header">
+            <i class="fas fa-bookmark"></i>
+            <span>我的书签</span>
+            <button class="widget-add" id="addBookmarkBtn" title="添加书签">
+              <i class="fas fa-plus"></i>
+            </button>
+          </div>
+          <div class="widget-content">
+            <ul class="bookmarks-list" id="bookmarksList"></ul>
+          </div>
+        </div>
+
+        <!-- 便签小组件 -->
+        <div class="widget notes-widget" id="notesWidget">
+          <div class="widget-header">
+            <i class="fas fa-sticky-note"></i>
+            <span>便签</span>
+            <span class="notes-saved" id="notesSaved">已保存</span>
+          </div>
+          <div class="widget-content">
+            <textarea id="notesArea" placeholder="在这里写下你的笔记..."></textarea>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 设置面板 -->
+    <div class="settings-panel" id="settingsPanel">
+      <div class="settings-content">
+        <div class="settings-header">
+          <h2><i class="fas fa-cog"></i> 设置</h2>
+          <button class="close-btn" id="closeSettingsBtn">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        
+        <div class="settings-body">
+          <!-- 背景设置 -->
+          <div class="settings-section">
+            <h3><i class="fas fa-image"></i> 背景设置</h3>
+            
+            <div class="setting-item">
+              <label>背景类型</label>
+              <select id="bgType">
+                <option value="gradient">渐变色</option>
+                <option value="unsplash">Unsplash 图库</option>
+                <option value="picsum">Lorem Picsum</option>
+                <option value="bing">必应每日壁纸</option>
+                <option value="custom">自定义图片</option>
+              </select>
+            </div>
+
+            <!-- 渐变色设置 -->
+            <div class="setting-group" id="gradientSettings">
+              <div class="setting-item">
+                <label>选择渐变</label>
+              </div>
+              <div class="gradient-presets" id="gradientPresets"></div>
+              <div class="setting-item">
+                <label>自定义颜色</label>
+                <div class="color-inputs">
+                  <input type="color" id="gradientColor1" value="#667eea">
+                  <input type="color" id="gradientColor2" value="#764ba2">
+                  <input type="color" id="gradientColor3" value="#ffffff" title="第三色（可选）">
+                </div>
+              </div>
+              <div class="setting-item">
+                <label>渐变角度</label>
+                <input type="range" id="gradientAngle" min="0" max="360" value="135">
+                <span id="angleValue">135°</span>
+              </div>
+            </div>
+
+            <!-- 图库设置 -->
+            <div class="setting-group" id="imageLibrarySettings" style="display:none;">
+              <div class="setting-item">
+                <label>自动换壁纸</label>
+                <div class="radio-group">
+                  <label class="radio-option">
+                    <input type="radio" name="autoChangeWallpaper" value="newtab" id="autoChangeNewtab">
+                    <span>打开新标签页时更换</span>
+                  </label>
+                  <label class="radio-option">
+                    <input type="radio" name="autoChangeWallpaper" value="hourly" id="autoChangeHourly">
+                    <span>每小时自动更换</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- 自定义图片设置 -->
+            <div class="setting-group" id="customImageSettings" style="display:none;">
+              <div class="setting-item">
+                <label>图片URL</label>
+                <input type="text" id="bgImageUrl" placeholder="输入图片URL">
+              </div>
+            </div>
+
+            <div class="setting-item">
+              <label>背景模糊</label>
+              <input type="range" id="bgBlur" min="0" max="20" value="0">
+              <span id="blurValue">0px</span>
+            </div>
+
+            <div class="setting-item">
+              <label>背景暗度</label>
+              <input type="range" id="bgDarkness" min="0" max="80" value="30">
+              <span id="darknessValue">30%</span>
+            </div>
+          </div>
+
+          <!-- 外观设置 -->
+          <div class="settings-section">
+            <h3><i class="fas fa-palette"></i> 外观设置</h3>
+            <div class="setting-item">
+              <label>毛玻璃效果</label>
+              <label class="switch">
+                <input type="checkbox" id="blurEffect" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>显示秒钟</label>
+              <label class="switch">
+                <input type="checkbox" id="showSeconds">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>12小时制</label>
+              <label class="switch">
+                <input type="checkbox" id="use12Hour">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>显示问候语</label>
+              <label class="switch">
+                <input type="checkbox" id="showGreeting" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 小组件设置 -->
+          <div class="settings-section">
+            <h3><i class="fas fa-th-large"></i> 小组件</h3>
+            <div class="setting-item">
+              <label>天气</label>
+              <label class="switch">
+                <input type="checkbox" id="showWeather" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>每日名言</label>
+              <label class="switch">
+                <input type="checkbox" id="showProverb" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>网页游戏</label>
+              <label class="switch">
+                <input type="checkbox" id="showGames" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>待办事项</label>
+              <label class="switch">
+                <input type="checkbox" id="showTodo" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>书签</label>
+              <label class="switch">
+                <input type="checkbox" id="showBookmarks" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <label>便签</label>
+              <label class="switch">
+                <input type="checkbox" id="showNotes" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 数据工具 -->
+          <div class="settings-section">
+            <h3><i class="fas fa-database"></i> 数据工具</h3>
+            <div class="setting-item setting-item-column">
+              <div class="setting-item-info">
+                <label>导出数据</label>
+                <p class="setting-hint">一键导出书签、快捷方式、待办、笔记、壁纸与谚语历史等用户数据。</p>
+              </div>
+              <button class="btn btn-primary settings-action-btn" id="exportDataBtn" type="button">
+                <i class="fas fa-file-export"></i>
+                <span>导出数据</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 关于 -->
+          <div class="settings-section">
+            <h3><i class="fas fa-info-circle"></i> 关于</h3>
+            <div class="about-info">
+              <p>MyTab Pro v5.0.0</p>
+              <p>一个美观、可自定义的新标签页</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加快捷方式弹窗 -->
+    <div class="modal" id="shortcutModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-plus-circle"></i> 添加快捷方式</h3>
+          <button class="close-btn" id="closeModalBtn">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>名称</label>
+            <input type="text" id="shortcutName" placeholder="网站名称">
+          </div>
+          <div class="form-group">
+            <label>网址</label>
+            <input type="text" id="shortcutUrl" placeholder="https://example.com">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelShortcutBtn">取消</button>
+          <button class="btn btn-primary" id="saveShortcutBtn">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加书签弹窗 -->
+    <div class="modal" id="bookmarkModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-bookmark"></i> 添加书签</h3>
+          <button class="close-btn" id="closeBookmarkModalBtn">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>书签名称</label>
+            <input type="text" id="bookmarkName" placeholder="例如：Google">
+          </div>
+          <div class="form-group">
+            <label>网址</label>
+            <input type="text" id="bookmarkUrl" placeholder="https://www.google.com">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelBookmarkBtn">取消</button>
+          <button class="btn btn-primary" id="saveBookmarkBtn">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 电影详情弹窗 
+    <div class="modal" id="movieModal">
+      <div class="modal-content movie-modal-content">
+        <button class="close-btn modal-close" id="closeMovieModal">
+          <i class="fas fa-times"></i>
+        </button>
+        <div class="movie-detail" id="movieDetail"></div>
+      </div>
+    </div>
+  </div>-->
+
+  <script src="js/storage.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/search.js"></script>
+  <script src="js/widgets.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

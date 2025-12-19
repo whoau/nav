@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drag & Drop Test</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="test-container" style="padding: 40px;">
+        <h1>Drag & Drop Test Page</h1>
+        <p>Drag the items below to reorder them. Changes should persist after reload.</p>
+        
+        <div class="shortcuts-grid" id="shortcutsGrid" style="max-width: 500px; margin-top: 20px;">
+            <!-- Items will be dynamically generated -->
+        </div>
+        
+        <button id="addTestShortcut" style="margin-top: 20px; padding: 10px 20px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer;">
+            Add Test Shortcut
+        </button>
+        
+        <div style="margin-top: 20px;">
+            <h3>Storage Status:</h3>
+            <pre id="storageStatus" style="background: #f0f0f0; padding: 10px; border-radius: 8px;">Loading...</pre>
+        </div>
+    </div>
+
+    <script src="js/storage.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/widgets.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        // For testing, create a simple storage mock if not in extension environment
+        if (typeof chrome === 'undefined') {
+            window.chrome = {
+                storage: {
+                    local: {
+                        get: function(keys, callback) {
+                            const data = {};
+                            keys.forEach(key => {
+                                const value = localStorage.getItem(`mytab_${key}`);
+                                data[key] = value ? JSON.parse(value) : null;
+                            });
+                            callback(data);
+                        },
+                        set: function(data, callback) {
+                            Object.entries(data).forEach(([key, value]) => {
+                                localStorage.setItem(`mytab_${key}`, JSON.stringify(value));
+                            });
+                            callback && callback();
+                        }
+                    }
+                }
+            };
+        }
+        
+        // Initialize test data
+        const testShortcuts = [
+            { name: 'Google', url: 'https://google.com' },
+            { name: 'YouTube', url: 'https://youtube.com' },
+            { name: 'GitHub', url: 'https://github.com' },
+            { name: 'Twitter', url: 'https://twitter.com' }
+        ];
+        
+        // Test drag and drop functionality
+        async function testDragDrop() {
+            // Initialize Chrome storage if available, otherwise fall back
+            let shortcuts;
+            try {
+                const data = await Storage.getAll();
+                shortcuts = data.shortcuts || testShortcuts;
+            } catch (error) {
+                console.log('Using test data:', error);
+                shortcuts = testShortcuts;
+            }
+            
+            const grid = document.getElementById('shortcutsGrid');
+            
+            const renderShortcuts = () => {
+                grid.innerHTML = shortcuts.map((shortcut, index) => {
+                    let domain = '';
+                    try {
+                        domain = new URL(shortcut.url).hostname;
+                    } catch (e) {
+                        domain = 'unknown';
+                    }
+                    const iconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
+                    const initial = shortcut.name.charAt(0).toUpperCase();
+                    
+                    return `
+                        <a href="${shortcut.url}" class="shortcut-item" data-index="${index}" draggable="true">
+                            <button class="shortcut-delete" data-index="${index}">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <div class="shortcut-icon">
+                                <img src="${iconUrl}" alt="${shortcut.name}" 
+                                    onerror="this.parentElement.innerHTML='<div class=\'shortcut-icon-fallback\'>${initial}</div>';">
+                            </div>
+                            <span class="shortcut-name">${shortcut.name}</span>
+                        </a>
+                    `;
+                }).join('');
+                
+                // Re-initialize drag and drop after rendering
+                try {
+                    Widgets.initShortcutsDragDrop(grid, shortcuts, renderShortcuts);
+                } catch (error) {
+                    console.log('Drag-drop initialization error:', error);
+                }
+            };
+            
+            renderShortcuts();
+            
+            // Add delete functionality
+            grid.addEventListener('click', async (e) => {
+                const deleteBtn = e.target.closest('.shortcut-delete');
+                if (deleteBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const index = parseInt(deleteBtn.dataset.index);
+                    shortcuts.splice(index, 1);
+                    
+                    if (typeof Storage !== 'undefined') {
+                        await Storage.set('shortcuts', shortcuts);
+                    } else {
+                        localStorage.setItem('mytab_shortcuts', JSON.stringify(shortcuts));
+                    }
+                    
+                    renderShortcuts();
+                }
+            });
+            
+            // Add test item functionality
+            document.getElementById('addTestShortcut').addEventListener('click', async () => {
+                const newShortcut = {
+                    name: `Test ${Date.now()}`,
+                    url: 'https://example.com'
+                };
+                shortcuts.push(newShortcut);
+                
+                if (typeof Storage !== 'undefined') {
+                    await Storage.set('shortcuts', shortcuts);
+                } else {
+                    localStorage.setItem('mytab_shortcuts', JSON.stringify(shortcuts));
+                }
+                
+                renderShortcuts();
+            });
+            
+            // Display current storage state
+            function updateStorageStatus() {
+                const statusEl = document.getElementById('storageStatus');
+                if (typeof Storage !== 'undefined') {
+                    Storage.getAll().then(data => {
+                        statusEl.textContent = JSON.stringify(data.shortcuts || shortcuts, null, 2);
+                    }).catch(error => {
+                        statusEl.textContent = 'Error loading storage: ' + error.message;
+                    });
+                } else {
+                    const stored = localStorage.getItem('mytab_shortcuts');
+                    statusEl.textContent = stored || JSON.stringify(shortcuts, null, 2);
+                }
+            }
+            
+            updateStorageStatus();
+            window.updateStorageStatus = updateStorageStatus;
+        }
+        
+        // Initialize the test
+testDragDrop().then(() => {
+            console.log('Test initialized');
+        }).catch(err => {
+            console.error('Test initialization error:', err);
+        });
+    </script>
+</body>
+</html>
