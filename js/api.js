@@ -4,6 +4,9 @@ const WALLPAPER_POOL_UPDATE_INTERVAL = 2 * 60 * 60 * 1000; // 2小时更新一�
 const WALLPAPER_POOL_TARGET_SIZE = 80; // 目标库存80+张
 const MAX_SHOWN_HISTORY = 100; // 记录最多100张已展示的壁纸
 
+const LOCATION_CACHE_TTL = 12 * 60 * 60 * 1000;
+const WEATHER_CACHE_TTL = 15 * 60 * 1000;
+
 const API = {
   // 壁纸库管理
   wallpaperLibrary: {
@@ -229,11 +232,38 @@ const API = {
     { name: '午夜', colors: ['#0f0c29', '#302b63'] }
   ],
 
+  getFaviconUrl(pageUrl, { size = 64, scaleFactor = 2 } = {}) {
+    try {
+      const url = new URL(pageUrl);
+      if (typeof chrome !== 'undefined' && chrome.runtime && (url.protocol === 'http:' || url.protocol === 'https:')) {
+        return `chrome://favicon2/?size=${size}&scale_factor=${scaleFactor}x&page_url=${encodeURIComponent(url.href)}`;
+      }
+      return `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(url.hostname)}`;
+    } catch {
+      return `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(pageUrl || '')}`;
+    }
+  },
+
   // 获取位置
-  async getLocation() {
+  async getLocation(forceNew = false) {
+    const now = Date.now();
+
+    const cached = await Storage.get('locationCache');
+    const cacheTime = await Storage.get('locationCacheTime');
+
+    if (!forceNew && cached && cacheTime && now - cacheTime < LOCATION_CACHE_TTL) {
+      return cached;
+    }
+
     const apis = [
-      { url: 'https://ipapi.co/json/', parse: d => ({ city: d.city || '未知', lat: parseFloat(d.latitude), lon: parseFloat(d.longitude) }) },
-      { url: 'http://ip-api.com/json/', parse: d => ({ city: d.city || '未知', lat: parseFloat(d.lat), lon: parseFloat(d.lon) }) }
+      {
+        url: 'https://ipapi.co/json/',
+        parse: d => ({ city: d.city || '未知', lat: parseFloat(d.latitude), lon: parseFloat(d.longitude) })
+      },
+      {
+        url: 'http://ip-api.com/json/',
+        parse: d => ({ city: d.city || '未知', lat: parseFloat(d.lat), lon: parseFloat(d.lon) })
+      }
     ];
 
     for (const api of apis) {
@@ -242,22 +272,44 @@ const API = {
         if (!res.ok) continue;
         const data = await res.json();
         const loc = api.parse(data);
-        if (loc.lat && loc.lon) return loc;
-      } catch { continue; }
+        if (loc.lat && loc.lon) {
+          await Storage.set('locationCache', loc);
+          await Storage.set('locationCacheTime', now);
+          return loc;
+        }
+      } catch {
+        continue;
+      }
     }
-    return { city: '北京', lat: 39.9, lon: 116.4 };
+
+    if (cached) return cached;
+
+    const fallback = { city: '北京', lat: 39.9, lon: 116.4 };
+    await Storage.set('locationCache', fallback);
+    await Storage.set('locationCacheTime', now);
+    return fallback;
   },
 
   // 获取天气
-  async getWeather(lat, lon) {
+  async getWeather(lat, lon, forceNew = false) {
+    const now = Date.now();
+    const cacheKey = `${Math.round(lat * 100) / 100},${Math.round(lon * 100) / 100}`;
+
+    const cached = await Storage.get('weatherCache');
+    const cacheTime = await Storage.get('weatherCacheTime');
+
+    if (!forceNew && cached?.key === cacheKey && cacheTime && now - cacheTime < WEATHER_CACHE_TTL) {
+      return cached.data;
+    }
+
     try {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=3`;
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
       const data = await res.json();
 
-      if (!data.current) return null;
+      if (!data.current) return cached?.data || null;
 
-      return {
+      const weather = {
         temp: Math.round(data.current.temperature_2m),
         humidity: data.current.relative_humidity_2m,
         windSpeed: Math.round(data.current.wind_speed_10m),
@@ -270,7 +322,14 @@ const API = {
           icon: this.getWeatherIcon(data.daily.weather_code[i])
         })) || []
       };
-    } catch { return null; }
+
+      await Storage.set('weatherCache', { key: cacheKey, data: weather });
+      await Storage.set('weatherCacheTime', now);
+
+      return weather;
+    } catch {
+      return cached?.data || null;
+    }
   },
 
   formatDate(dateStr) {

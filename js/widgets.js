@@ -33,7 +33,7 @@ const Widgets = {
         e.preventDefault();
         refreshBtn.classList.add('loading');
         this.location = null;
-        this.loadWeather().finally(() => {
+        this.loadWeather(true).finally(() => {
           refreshBtn.classList.remove('loading');
         });
       });
@@ -42,7 +42,7 @@ const Widgets = {
     await this.loadWeather();
   },
 
-  async loadWeather() {
+  async loadWeather(forceNew = false) {
     const weatherContent = document.getElementById('weatherContent');
     if (!weatherContent) return;
 
@@ -55,10 +55,10 @@ const Widgets = {
 
     try {
       if (!this.location) {
-        this.location = await API.getLocation();
+        this.location = await API.getLocation(forceNew);
       }
 
-      const weather = await API.getWeather(this.location.lat, this.location.lon);
+      const weather = await API.getWeather(this.location.lat, this.location.lon, forceNew);
       if (!weather) throw new Error('获取天气失败');
 
       weatherContent.innerHTML = `
@@ -410,6 +410,9 @@ const Widgets = {
 
     let touchStartTime = 0;
     let touchItem = null;
+    let touchGhost = null;
+    let touchOffsetX = 0;
+    let touchOffsetY = 0;
 
     let overElement = null;
     let placeholder = null;
@@ -466,7 +469,7 @@ const Widgets = {
             { transform: 'translate(0, 0)' }
           ],
           {
-            duration: 180,
+            duration: 220,
             easing: 'cubic-bezier(0.2, 0, 0, 1)'
           }
         );
@@ -551,6 +554,42 @@ const Widgets = {
       movePlaceholder(targetItem, insertAfter);
     };
 
+    const removeTouchGhost = () => {
+      if (touchGhost) {
+        touchGhost.remove();
+        touchGhost = null;
+      }
+    };
+
+    const ensureTouchGhost = (item, touch) => {
+      if (touchGhost) return;
+
+      const rect = item.getBoundingClientRect();
+      touchOffsetX = touch.clientX - rect.left;
+      touchOffsetY = touch.clientY - rect.top;
+
+      touchGhost = item.cloneNode(true);
+      touchGhost.classList.add('dragging');
+      touchGhost.style.position = 'fixed';
+      touchGhost.style.left = '0';
+      touchGhost.style.top = '0';
+      touchGhost.style.width = `${rect.width}px`;
+      touchGhost.style.height = `${rect.height}px`;
+      touchGhost.style.margin = '0';
+      touchGhost.style.pointerEvents = 'none';
+      touchGhost.style.zIndex = '2000';
+      touchGhost.style.opacity = '0.95';
+      touchGhost.style.transition = 'none';
+      touchGhost.style.boxShadow = '0 14px 40px rgba(0, 0, 0, 0.35)';
+
+      document.body.appendChild(touchGhost);
+    };
+
+    const moveTouchGhost = (touch) => {
+      if (!touchGhost) return;
+      touchGhost.style.transform = `translate(${touch.clientX - touchOffsetX}px, ${touch.clientY - touchOffsetY}px)`;
+    };
+
     const persistDomOrder = async () => {
       const orderedIndices = Array.from(grid.querySelectorAll('.shortcut-item'))
         .map((el) => parseInt(el.dataset.index))
@@ -568,6 +607,7 @@ const Widgets = {
 
     const resetDragState = () => {
       this.clearDragState(grid);
+      removeTouchGhost();
       draggedElement = null;
       draggedIndex = -1;
       isDragging = false;
@@ -682,9 +722,8 @@ const Widgets = {
       resetDragState();
     });
 
-    // Touch support for mobile devices (keep existing behavior)
+    // Touch support for mobile devices (with placeholder + animations)
     grid.addEventListener('touchstart', (e) => {
-      // Don't allow dragging if clicking on delete button
       if (e.target.closest('.shortcut-delete')) return;
 
       const item = e.target.closest('.shortcut-item');
@@ -697,44 +736,83 @@ const Widgets = {
     grid.addEventListener('touchmove', (e) => {
       if (!touchItem) return;
 
-      // Remove delay - start dragging immediately for fluid interaction
+      const touch = e.touches[0];
+      if (!touch) return;
+
+      // Prevent page scrolling while dragging
       e.preventDefault();
 
       if (!isDragging) {
         isDragging = true;
+        didDrop = false;
+
         draggedElement = touchItem;
         draggedIndex = getItemIndex(touchItem);
+        if (draggedIndex === -1) return;
+
+        grid.classList.add('reordering');
+
         touchItem.classList.add('dragging');
         touchItem.style.opacity = '0.5';
-      }
 
-      // Find element under touch position
-      const touch = e.touches[0];
-      const element = document.elementFromPoint(touch.clientX, touch.clientY);
-      const item = element?.closest('.shortcut-item');
-
-      if (item && item !== touchItem) {
-        if (overElement && overElement !== item) {
-          overElement.classList.remove('drag-over');
+        ensurePlaceholder(touchItem);
+        placeholderAnchorNode = touchItem.nextSibling;
+        if (!placeholder.isConnected) {
+          grid.insertBefore(placeholder, placeholderAnchorNode);
         }
-        item.classList.add('drag-over');
-        overElement = item;
+
+        ensureTouchGhost(touchItem, touch);
+        moveTouchGhost(touch);
+
+        // Hide original element after placeholder is in place
+        requestAnimationFrame(() => {
+          if (draggedElement) draggedElement.style.display = 'none';
+        });
       }
+
+      moveTouchGhost(touch);
+      const element = document.elementFromPoint(touch.clientX, touch.clientY);
+      updatePlaceholderPosition(touch.clientX, touch.clientY, element);
     });
 
-    grid.addEventListener('touchend', () => {
-      if (isDragging && overElement && overElement !== draggedElement) {
-        const dropIndex = getItemIndex(overElement);
-        performReorder(draggedIndex, dropIndex);
-      }
-
+    const finalizeTouchDrag = async () => {
       touchStartTime = 0;
       touchItem = null;
-      this.clearDragState(grid);
-      isDragging = false;
-      overElement = null;
-      draggedElement = null;
-      draggedIndex = -1;
+
+      if (!isDragging) {
+        resetDragState();
+        return;
+      }
+
+      if (!draggedElement || !placeholder) {
+        resetDragState();
+        return;
+      }
+
+      didDrop = true;
+
+      if (!placeholder.isConnected) {
+        grid.insertBefore(placeholder, placeholderAnchorNode);
+      }
+
+      placeholder.replaceWith(draggedElement);
+      draggedElement.style.display = '';
+
+      grid.classList.remove('reordering');
+      await persistDomOrder();
+      resetDragState();
+    };
+
+    grid.addEventListener('touchend', () => {
+      finalizeTouchDrag().catch(() => {
+        resetDragState();
+      });
+    });
+
+    grid.addEventListener('touchcancel', () => {
+      resetDragState();
+      touchStartTime = 0;
+      touchItem = null;
     });
 
     // Prevent navigation when clicking on shortcuts during drag

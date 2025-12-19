@@ -2,6 +2,20 @@
 const PROVERB_HISTORY_LIMIT = 60;
 
 const Storage = {
+  _memoryCache: new Map(),
+  _pendingGets: new Map(),
+
+  _clone(value) {
+    if (value && typeof value === 'object') {
+      try {
+        return structuredClone(value);
+      } catch {
+        return JSON.parse(JSON.stringify(value));
+      }
+    }
+    return value;
+  },
+
   defaults: {
     settings: {
       bgType: 'gradient',
@@ -46,49 +60,103 @@ const Storage = {
     lastWallpaperChange: 0,
     currentWallpaper: '',
     wallpaperHistory: [],
+    wallpaperLibrary: {
+      bing: [],
+      unsplash: [],
+      picsum: [],
+      shownWallpapers: [],
+      lastUpdated: 0
+    },
+    locationCache: null,
+    locationCacheTime: 0,
+    weatherCache: null,
+    weatherCacheTime: 0,
     proverbCache: null,
     proverbCacheDate: null,
     proverbHistory: []
   },
 
   async get(key) {
-    return new Promise((resolve) => {
+    if (this._memoryCache.has(key)) {
+      return this._clone(this._memoryCache.get(key));
+    }
+
+    if (this._pendingGets.has(key)) {
+      const value = await this._pendingGets.get(key);
+      return this._clone(value);
+    }
+
+    const pending = new Promise((resolve) => {
       if (typeof chrome !== 'undefined' && chrome.storage) {
         chrome.storage.local.get([key], (result) => {
-          resolve(result[key] !== undefined ? result[key] : this.defaults[key]);
+          const fallback = this.defaults.hasOwnProperty(key) ? this.defaults[key] : undefined;
+          resolve(result[key] !== undefined ? result[key] : fallback);
         });
       } else {
         const data = localStorage.getItem(`mytab_${key}`);
-        resolve(data ? JSON.parse(data) : this.defaults[key]);
+        const fallback = this.defaults.hasOwnProperty(key) ? this.defaults[key] : undefined;
+        resolve(data ? JSON.parse(data) : fallback);
       }
+    }).then((value) => {
+      const cachedValue = this._clone(value);
+      this._memoryCache.set(key, cachedValue);
+      this._pendingGets.delete(key);
+      return cachedValue;
+    }).catch((error) => {
+      this._pendingGets.delete(key);
+      throw error;
     });
+
+    this._pendingGets.set(key, pending);
+    const value = await pending;
+    return this._clone(value);
   },
 
   async set(key, value) {
+    const storedValue = this._clone(value);
+    this._memoryCache.set(key, storedValue);
+    this._pendingGets.delete(key);
+
     return new Promise((resolve) => {
       if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.set({ [key]: value }, resolve);
+        chrome.storage.local.set({ [key]: storedValue }, resolve);
       } else {
-        localStorage.setItem(`mytab_${key}`, JSON.stringify(value));
+        localStorage.setItem(`mytab_${key}`, JSON.stringify(storedValue));
         resolve();
       }
     });
   },
 
   async getAll() {
-    const settings = await this.get('settings');
-    const shortcuts = await this.get('shortcuts');
-    const bookmarks = await this.get('bookmarks');
-    const todos = await this.get('todos');
-    const notes = await this.get('notes');
-    const searchEngine = await this.get('searchEngine');
-    const lastWallpaperChange = await this.get('lastWallpaperChange');
-    const currentWallpaper = await this.get('currentWallpaper');
-    const wallpaperHistory = await this.get('wallpaperHistory');
-    const wallpaperLibrary = await this.get('wallpaperLibrary');
-    const proverbCache = await this.get('proverbCache');
-    const proverbCacheDate = await this.get('proverbCacheDate');
-    const proverbHistory = await this.get('proverbHistory');
+    const [
+      settings,
+      shortcuts,
+      bookmarks,
+      todos,
+      notes,
+      searchEngine,
+      lastWallpaperChange,
+      currentWallpaper,
+      wallpaperHistory,
+      wallpaperLibrary,
+      proverbCache,
+      proverbCacheDate,
+      proverbHistory
+    ] = await Promise.all([
+      this.get('settings'),
+      this.get('shortcuts'),
+      this.get('bookmarks'),
+      this.get('todos'),
+      this.get('notes'),
+      this.get('searchEngine'),
+      this.get('lastWallpaperChange'),
+      this.get('currentWallpaper'),
+      this.get('wallpaperHistory'),
+      this.get('wallpaperLibrary'),
+      this.get('proverbCache'),
+      this.get('proverbCacheDate'),
+      this.get('proverbHistory')
+    ]);
 
     return {
       settings: { ...this.defaults.settings, ...settings },
@@ -173,6 +241,9 @@ const Storage = {
   },
 
   async clear() {
+    this._memoryCache.clear();
+    this._pendingGets.clear();
+
     if (typeof chrome !== 'undefined' && chrome.storage) {
       await chrome.storage.local.clear();
     } else {

@@ -454,39 +454,55 @@ const App = {
 
     const renderShortcuts = () => {
       grid.innerHTML = shortcuts.map((shortcut, index) => {
+        const name = shortcut.name || '';
+        const url = shortcut.url || '';
+
+        const firstChar = Array.from(name.trim())[0] || '?';
+        const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
+
+        const iconValue = shortcut.icon || 'default';
+        const customColor = shortcut.color || '';
+
+        const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
+        const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
+        const iconText = isTextIcon ? iconValue : initial;
+        const multiClass = Array.from(iconText).length > 1 ? ' multi' : '';
+
         let domain = '';
         try {
-          domain = new URL(shortcut.url).hostname;
-        } catch (e) {
-          domain = 'unknown';
+          domain = new URL(url).hostname;
+        } catch {
+          domain = url;
         }
-        const iconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
-        const initial = shortcut.name.charAt(0).toUpperCase();
-        
-        const hasCustomIcon = shortcut.icon && shortcut.icon !== 'default';
-        const customColor = shortcut.color || '';
-        const hasCustomDataIcon = shortcut.icon && shortcut.icon.startsWith('data:');
-        
+
+        const faviconUrl = typeof API !== 'undefined' && typeof API.getFaviconUrl === 'function'
+          ? API.getFaviconUrl(url)
+          : `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`;
+
+        let iconMarkup = '';
+        if (isTextIcon) {
+          iconMarkup = `<div class="shortcut-icon-fallback${multiClass}">${iconText}</div>`;
+        } else {
+          const imgSrc = isDataIcon ? iconValue : faviconUrl;
+          iconMarkup = `
+            <img src="${imgSrc}" alt="${name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+            <div class="shortcut-icon-fallback${multiClass}" style="display: none;">${iconText}</div>
+          `;
+        }
+
         return `
-          <a href="${shortcut.url}" class="shortcut-item" data-index="${index}" data-has-custom-icon="${hasCustomDataIcon}" draggable="true" ${customColor ? `style="--shortcut-icon-color: ${customColor}"` : ''}>
+          <a href="${url}" class="shortcut-item" data-index="${index}" draggable="true" ${customColor ? `style="--shortcut-icon-color: ${customColor}"` : ''}>
             <button class="shortcut-delete" data-index="${index}">
               <i class="fas fa-times"></i>
             </button>
             <div class="shortcut-icon">
-              ${hasCustomDataIcon 
-                ? `<img src="${shortcut.icon}" alt="${shortcut.name}"><div class="shortcut-icon-fallback" style="display: none;">${initial}</div>`
-                : hasCustomIcon
-                  ? `<div class="shortcut-icon-fallback">${initial}</div>`
-                  : `<img src="${iconUrl}" alt="${shortcut.name}" 
-                     onerror="this.parentElement.innerHTML='<div class=\\'shortcut-icon-fallback\\'>${initial}</div>';">`
-              }
+              ${iconMarkup}
             </div>
-            <span class="shortcut-name">${shortcut.name}</span>
+            <span class="shortcut-name">${name}</span>
           </a>
         `;
       }).join('');
-      
-      // Re-initialize drag and drop after rendering
+
       Widgets.initShortcutsDragDrop(grid, shortcuts, renderShortcuts);
     };
 
@@ -567,6 +583,7 @@ const App = {
     const editModal = document.getElementById('editShortcutModal');
     const editNameInput = document.getElementById('editShortcutName');
     const editUrlInput = document.getElementById('editShortcutUrl');
+    const editIconTextInput = document.getElementById('editIconText');
     const editIconColorInput = document.getElementById('editIconColor');
     const iconUploadInput = document.getElementById('iconUpload');
     const iconPreview = document.getElementById('editIconPreview');
@@ -580,109 +597,156 @@ const App = {
     
     let editingIndex = -1;
     let customIconData = null;
-    
+
+    const getInitialFromName = (name) => {
+      const firstChar = Array.from((name || '').trim())[0] || '?';
+      return /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
+    };
+
+    const applyPreviewColor = (color) => {
+      if (!iconFallback) return;
+
+      if (color) {
+        iconFallback.style.setProperty('--shortcut-icon-color', color);
+      } else {
+        iconFallback.style.removeProperty('--shortcut-icon-color');
+      }
+    };
+
+    const updateIconPreview = ({ name, icon, color }) => {
+      if (!iconPreview || !iconFallback) return;
+
+      const initial = getInitialFromName(name);
+      const iconValue = icon || 'default';
+      const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
+      const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
+      const fallbackText = isTextIcon ? iconValue : initial;
+
+      iconFallback.textContent = fallbackText;
+      iconFallback.classList.toggle('multi', Array.from(fallbackText).length > 1);
+
+      applyPreviewColor(color);
+
+      if (isDataIcon) {
+        iconPreview.src = iconValue;
+        iconPreview.style.display = 'block';
+        iconFallback.style.display = 'none';
+
+        iconPreview.onload = () => {
+          iconFallback.style.display = 'none';
+        };
+
+        iconPreview.onerror = () => {
+          iconPreview.style.display = 'none';
+          iconFallback.style.display = 'flex';
+        };
+
+        return;
+      }
+
+      iconPreview.style.display = 'none';
+      iconPreview.src = '';
+      iconFallback.style.display = 'flex';
+    };
+
+    const updateIconPreviewFromForm = () => {
+      const name = editNameInput?.value || '';
+      const color = editIconColorInput?.value || '';
+      const iconText = editIconTextInput?.value?.trim() || '';
+      const icon = customIconData ? customIconData : (iconText ? iconText : 'default');
+      updateIconPreview({ name, icon, color });
+    };
+
     // 打开编辑模态框
     const openEditModal = (index) => {
       editingIndex = index;
       const shortcut = shortcuts[index];
-      
-      // 填充表单数据
+
+      const iconValue = shortcut?.icon || 'default';
+      const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
+      const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
+
       editNameInput.value = shortcut.name || '';
       editUrlInput.value = shortcut.url || '';
       editIconColorInput.value = shortcut.color || '#667eea';
-      customIconData = shortcut.icon && shortcut.icon.startsWith('data:') ? shortcut.icon : null;
-      
-      // 更新图标预览
-      updateIconPreview(shortcut);
-      
-      // 显示模态框
+
+      if (editIconTextInput) {
+        editIconTextInput.value = isTextIcon ? iconValue : '';
+      }
+
+      customIconData = isDataIcon ? iconValue : null;
+
+      updateIconPreviewFromForm();
+
       editModal?.classList.add('show');
       editNameInput.focus();
     };
-    
-    // 更新图标预览
-    const updateIconPreview = (shortcut) => {
-      const hasCustomIcon = shortcut.icon && shortcut.icon !== 'default';
-      const initial = shortcut.name ? shortcut.name.charAt(0).toUpperCase() : '?';
-      
-      if (hasCustomIcon && shortcut.icon.startsWith('data:')) {
-        // 自定义上传的图标
-        iconPreview.src = shortcut.icon;
-        iconPreview.style.display = 'block';
-        iconFallback.style.display = 'none';
-        iconPreview.onload = () => {
-          // 如果图标加载成功，隐藏fallback
-          iconFallback.style.display = 'none';
-        };
-        iconPreview.onerror = () => {
-          // 如果图标加载失败，显示fallback
-          iconPreview.style.display = 'none';
-          iconFallback.style.display = 'flex';
-          iconFallback.textContent = initial;
-          iconFallback.style.background = shortcut.color || 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
-        };
-      } else {
-        // 使用默认图标或网站favicon
-        iconPreview.style.display = 'none';
-        iconFallback.style.display = 'flex';
-        iconFallback.textContent = initial;
-        iconFallback.style.background = shortcut.color || 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
-      }
-    };
-    
+
     // 上传图标
     if (uploadIconBtn && iconUploadInput) {
       uploadIconBtn.addEventListener('click', () => {
         iconUploadInput.click();
       });
-      
+
       iconUploadInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file && file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            customIconData = event.target.result;
-            iconPreview.src = customIconData;
-            iconPreview.style.display = 'block';
-            iconFallback.style.display = 'none';
-          };
-          reader.readAsDataURL(file);
-        }
+        const file = e.target.files?.[0];
+        if (!file || !file.type.startsWith('image/')) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          customIconData = event.target.result;
+          if (editIconTextInput) editIconTextInput.value = '';
+          updateIconPreviewFromForm();
+        };
+        reader.readAsDataURL(file);
       });
     }
-    
+
+    // 文字图标
+    if (editIconTextInput) {
+      editIconTextInput.addEventListener('input', () => {
+        if (customIconData) {
+          customIconData = null;
+          if (iconUploadInput) iconUploadInput.value = '';
+        }
+        updateIconPreviewFromForm();
+      });
+    }
+
     // 使用默认图标
     if (useDefaultIconBtn) {
       useDefaultIconBtn.addEventListener('click', () => {
         customIconData = null;
-        iconPreview.style.display = 'none';
-        iconFallback.style.display = 'flex';
-        iconFallback.textContent = editNameInput.value ? editNameInput.value.charAt(0).toUpperCase() : '?';
-        iconFallback.style.background = 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
+        if (iconUploadInput) iconUploadInput.value = '';
+        if (editIconTextInput) editIconTextInput.value = '';
+        updateIconPreviewFromForm();
       });
     }
-    
-    // 移除自定义图标
+
+    // 移除自定义图标（上传/文字）
     if (removeCustomIconBtn) {
       removeCustomIconBtn.addEventListener('click', () => {
         customIconData = null;
-        iconUploadInput.value = ''; // 清空文件输入
-        iconPreview.style.display = 'none';
-        iconPreview.src = '';
-        iconFallback.style.display = 'flex';
-        iconFallback.textContent = editNameInput.value ? editNameInput.value.charAt(0).toUpperCase() : '?';
-        iconFallback.style.background = editIconColorInput.value || 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))';
+        if (iconUploadInput) iconUploadInput.value = '';
+        if (editIconTextInput) editIconTextInput.value = '';
+        updateIconPreviewFromForm();
       });
     }
-    
-    // 关闭编辑模态框
+
     const closeEditModal = () => {
       editModal?.classList.remove('show');
       editingIndex = -1;
       customIconData = null;
-      iconUploadInput.value = ''; // 清空文件输入
+      if (iconUploadInput) iconUploadInput.value = '';
+      if (editIconTextInput) editIconTextInput.value = '';
+      if (iconPreview) {
+        iconPreview.src = '';
+        iconPreview.style.display = 'none';
+      }
+      iconFallback?.style.removeProperty('--shortcut-icon-color');
+      iconFallback?.classList.remove('multi');
     };
-    
+
     if (closeEditModalBtn) closeEditModalBtn.addEventListener('click', closeEditModal);
     if (cancelEditShortcutBtn) cancelEditShortcutBtn.addEventListener('click', closeEditModal);
     if (editModal) {
@@ -690,61 +754,50 @@ const App = {
         if (e.target === editModal) closeEditModal();
       });
     }
-    
+
     // 保存编辑
     if (saveEditShortcutBtn) {
       saveEditShortcutBtn.addEventListener('click', async () => {
         const name = editNameInput.value.trim();
         let url = editUrlInput.value.trim();
         const color = editIconColorInput.value;
-        
+        const iconText = editIconTextInput?.value?.trim() || '';
+
         if (!name || !url) {
           alert('请填写名称和网址');
           return;
         }
-        
+
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
           url = 'https://' + url;
         }
-        
-        // 更新快捷方式
+
         const updatedShortcut = { name, url };
-        
-        // 如果有自定义图标，保存图标数据
+
         if (customIconData) {
           updatedShortcut.icon = customIconData;
+        } else if (iconText) {
+          updatedShortcut.icon = iconText;
         } else {
           updatedShortcut.icon = 'default';
         }
-        
-        // 保存颜色
+
         if (color) {
           updatedShortcut.color = color;
+        } else {
+          updatedShortcut.color = '';
         }
-        
+
         shortcuts[editingIndex] = updatedShortcut;
         await Storage.set('shortcuts', shortcuts);
         renderShortcuts();
         closeEditModal();
       });
     }
-    
+
     // 实时更新预览
-    if (editNameInput) {
-      editNameInput.addEventListener('input', () => {
-        if (iconFallback.style.display !== 'none') {
-          iconFallback.textContent = editNameInput.value ? editNameInput.value.charAt(0).toUpperCase() : '?';
-        }
-      });
-    }
-    
-    if (editIconColorInput) {
-      editIconColorInput.addEventListener('input', () => {
-        if (iconFallback.style.display !== 'none') {
-          iconFallback.style.background = editIconColorInput.value;
-        }
-      });
-    }
+    editNameInput?.addEventListener('input', updateIconPreviewFromForm);
+    editIconColorInput?.addEventListener('input', updateIconPreviewFromForm);
 
     // ==================== 右键菜单 ====================
     const contextMenu = document.getElementById('shortcutContextMenu');
