@@ -391,13 +391,21 @@ body {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  background: var(--shortcut-icon-color, linear-gradient(135deg, var(--primary-color), var(--secondary-color)));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  padding: 0 4px;
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1;
+  text-align: center;
   color: white;
+}
+
+.shortcut-icon-fallback.multi {
+  font-size: 12px;
+  letter-spacing: -0.5px;
 }
 
 .shortcut-name {
@@ -2548,13 +2556,20 @@ input[type="range"]::-webkit-slider-thumb {
   width: 64px;
   height: 64px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  background: var(--shortcut-icon-color, linear-gradient(135deg, var(--primary-color), var(--secondary-color)));
   display: none;
   align-items: center;
   justify-content: center;
+  padding: 0 6px;
   font-size: 24px;
   font-weight: 600;
+  line-height: 1;
+  text-align: center;
   color: white;
+}
+
+.icon-fallback.multi {
+  font-size: 18px;
 }
 
 .icon-preview:has(.icon-fallback:not([style*="display: none"])) img {
@@ -2574,6 +2589,24 @@ input[type="range"]::-webkit-slider-thumb {
   flex-direction: column;
   gap: 8px;
   align-items: center;
+}
+
+.icon-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.icon-text label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.icon-text input {
+  width: 120px;
+  text-align: center;
 }
 
 .icon-color {
@@ -2629,10 +2662,6 @@ input[type="range"]::-webkit-slider-thumb {
   font-size: 10px;
 }
 
-/* 自定义图标样式 */
-.shortcut-item[data-has-custom-icon="true"] .shortcut-icon-fallback {
-  background: var(--shortcut-icon-color, linear-gradient(135deg, var(--primary-color), var(--secondary-color)));
-}
 
 /* 响应式调整 */
 @media (max-width: 768px) {
