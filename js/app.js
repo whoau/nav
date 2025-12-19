@@ -469,9 +469,6 @@ const App = {
         
         return `
           <a href="${shortcut.url}" class="shortcut-item" data-index="${index}" data-has-custom-icon="${hasCustomDataIcon}" draggable="true" ${customColor ? `style="--shortcut-icon-color: ${customColor}"` : ''}>
-            <button class="shortcut-edit" data-index="${index}">
-              <i class="fas fa-edit"></i>
-            </button>
             <button class="shortcut-delete" data-index="${index}">
               <i class="fas fa-times"></i>
             </button>
@@ -498,8 +495,7 @@ const App = {
     // 删除快捷方式
     grid.addEventListener('click', async (e) => {
       const deleteBtn = e.target.closest('.shortcut-delete');
-      const editBtn = e.target.closest('.shortcut-edit');
-      
+
       if (deleteBtn) {
         e.preventDefault();
         e.stopPropagation();
@@ -507,13 +503,6 @@ const App = {
         shortcuts.splice(index, 1);
         await Storage.set('shortcuts', shortcuts);
         renderShortcuts();
-      }
-      
-      if (editBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        const index = parseInt(editBtn.dataset.index);
-        openEditModal(index);
       }
     });
 
@@ -756,6 +745,84 @@ const App = {
         }
       });
     }
+
+    // ==================== 右键菜单 ====================
+    const contextMenu = document.getElementById('shortcutContextMenu');
+    const contextEditBtn = document.getElementById('shortcutContextEdit');
+    let contextMenuIndex = -1;
+
+    const hideContextMenu = () => {
+      if (!contextMenu) return;
+      contextMenu.classList.remove('show');
+      contextMenu.setAttribute('aria-hidden', 'true');
+      contextMenuIndex = -1;
+    };
+
+    const showContextMenu = (x, y) => {
+      if (!contextMenu) return;
+
+      contextMenu.style.left = `${x}px`;
+      contextMenu.style.top = `${y}px`;
+      contextMenu.classList.add('show');
+      contextMenu.setAttribute('aria-hidden', 'false');
+
+      // Prevent overflow beyond viewport
+      requestAnimationFrame(() => {
+        const rect = contextMenu.getBoundingClientRect();
+        const padding = 8;
+
+        let left = x;
+        let top = y;
+
+        if (left + rect.width > window.innerWidth - padding) {
+          left = window.innerWidth - rect.width - padding;
+        }
+        if (top + rect.height > window.innerHeight - padding) {
+          top = window.innerHeight - rect.height - padding;
+        }
+
+        contextMenu.style.left = `${Math.max(padding, left)}px`;
+        contextMenu.style.top = `${Math.max(padding, top)}px`;
+      });
+    };
+
+    grid.addEventListener('contextmenu', (e) => {
+      const item = e.target.closest('.shortcut-item');
+      if (!item) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const index = parseInt(item.dataset.index);
+      if (Number.isNaN(index)) return;
+
+      contextMenuIndex = index;
+      showContextMenu(e.clientX, e.clientY);
+    });
+
+    contextEditBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (contextMenuIndex !== -1) {
+        openEditModal(contextMenuIndex);
+      }
+      hideContextMenu();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (contextMenu?.classList.contains('show') && !contextMenu.contains(e.target)) {
+        hideContextMenu();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideContextMenu();
+      }
+    });
+
+    window.addEventListener('blur', hideContextMenu);
+    window.addEventListener('scroll', hideContextMenu, true);
   },
 
   // 设置

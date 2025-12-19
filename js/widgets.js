@@ -404,16 +404,21 @@ const Widgets = {
     grid.dataset.dragInitialized = 'true';
 
     let draggedElement = null;
-    let draggedIndex = null;
+    let draggedIndex = -1;
     let isDragging = false;
+    let didDrop = false;
+
     let touchStartTime = 0;
     let touchItem = null;
+
     let overElement = null;
-    
+    let placeholder = null;
+    let placeholderAnchorNode = null;
+
     const getItemIndex = (element) => {
       if (!element) return -1;
       const index = parseInt(element.dataset.index);
-      return isNaN(index) ? -1 : index;
+      return Number.isNaN(index) ? -1 : index;
     };
 
     const performReorder = async (fromIndex, toIndex) => {
@@ -421,108 +426,280 @@ const Widgets = {
 
       const draggedShortcut = shortcuts[fromIndex];
       shortcuts.splice(fromIndex, 1);
-      
+
       // Adjust insert index if dragging forward to prevent off-by-one errors
       const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
       shortcuts.splice(insertIndex, 0, draggedShortcut);
-      
+
       await Storage.set('shortcuts', shortcuts);
       renderCallback();
+    };
+
+    const getAnimatableItems = () => {
+      return Array.from(grid.querySelectorAll('.shortcut-item')).filter((item) => {
+        if (item === draggedElement) return false;
+        if (item.style.display === 'none') return false;
+        return true;
+      });
+    };
+
+    const captureRects = () => {
+      const rects = new Map();
+      getAnimatableItems().forEach((item) => {
+        rects.set(item, item.getBoundingClientRect());
+      });
+      return rects;
+    };
+
+    const animateFromRects = (prevRects) => {
+      prevRects.forEach((prevRect, item) => {
+        const nextRect = item.getBoundingClientRect();
+        const dx = prevRect.left - nextRect.left;
+        const dy = prevRect.top - nextRect.top;
+
+        if (dx === 0 && dy === 0) return;
+
+        item.getAnimations().forEach((animation) => animation.cancel());
+        item.animate(
+          [
+            { transform: `translate(${dx}px, ${dy}px)` },
+            { transform: 'translate(0, 0)' }
+          ],
+          {
+            duration: 180,
+            easing: 'cubic-bezier(0.2, 0, 0, 1)'
+          }
+        );
+      });
+    };
+
+    const ensurePlaceholder = (referenceItem) => {
+      if (placeholder) return;
+      placeholder = document.createElement('div');
+      placeholder.className = 'shortcut-placeholder';
+
+      if (referenceItem) {
+        placeholder.style.width = `${referenceItem.offsetWidth}px`;
+        placeholder.style.height = `${referenceItem.offsetHeight}px`;
+      }
+    };
+
+    const movePlaceholder = (referenceItem, insertAfter) => {
+      if (!placeholder) return;
+
+      if (!referenceItem) {
+        if (grid.lastElementChild === placeholder) return;
+        const prevRects = captureRects();
+        grid.appendChild(placeholder);
+        animateFromRects(prevRects);
+        return;
+      }
+
+      if (insertAfter) {
+        if (referenceItem.nextSibling === placeholder) return;
+        const prevRects = captureRects();
+        referenceItem.after(placeholder);
+        animateFromRects(prevRects);
+        return;
+      }
+
+      if (referenceItem.previousSibling === placeholder) return;
+      const prevRects = captureRects();
+      grid.insertBefore(placeholder, referenceItem);
+      animateFromRects(prevRects);
+    };
+
+    const updatePlaceholderPosition = (clientX, clientY, eventTarget) => {
+      if (!placeholder || !isDragging) return;
+
+      const element = eventTarget || document.elementFromPoint(clientX, clientY);
+
+      // Keep placeholder stable when hovering over it
+      if (element?.closest?.('.shortcut-placeholder')) return;
+
+      const targetItem = element?.closest?.('.shortcut-item') || null;
+
+      if (!targetItem || targetItem === draggedElement || targetItem.style.display === 'none') {
+        if (overElement) {
+          overElement.classList.remove('drag-over');
+          overElement = null;
+        }
+        return;
+      }
+
+      if (overElement && overElement !== targetItem) {
+        overElement.classList.remove('drag-over');
+      }
+      if (targetItem !== draggedElement) {
+        targetItem.classList.add('drag-over');
+        overElement = targetItem;
+      }
+
+      const rect = targetItem.getBoundingClientRect();
+      const offsetY = clientY - rect.top;
+      const offsetX = clientX - rect.left;
+
+      let insertAfter = false;
+      if (offsetY > rect.height * 0.6) {
+        insertAfter = true;
+      } else if (offsetY < rect.height * 0.4) {
+        insertAfter = false;
+      } else {
+        insertAfter = offsetX > rect.width / 2;
+      }
+
+      movePlaceholder(targetItem, insertAfter);
+    };
+
+    const persistDomOrder = async () => {
+      const orderedIndices = Array.from(grid.querySelectorAll('.shortcut-item'))
+        .map((el) => parseInt(el.dataset.index))
+        .filter((i) => !Number.isNaN(i));
+
+      if (orderedIndices.length !== shortcuts.length) return;
+
+      const current = shortcuts.slice();
+      const orderedShortcuts = orderedIndices.map((i) => current[i]);
+
+      shortcuts.splice(0, shortcuts.length, ...orderedShortcuts);
+      await Storage.set('shortcuts', shortcuts);
+      renderCallback();
+    };
+
+    const resetDragState = () => {
+      this.clearDragState(grid);
+      draggedElement = null;
+      draggedIndex = -1;
+      isDragging = false;
+      didDrop = false;
+      overElement = null;
+      placeholder = null;
+      placeholderAnchorNode = null;
     };
 
     // Mouse drag events
     grid.addEventListener('dragstart', (e) => {
       // Don't allow dragging if clicking on delete button
       if (e.target.closest('.shortcut-delete')) return;
-      
+
       const item = e.target.closest('.shortcut-item');
       if (!item) return;
-      
+
       draggedElement = item;
       draggedIndex = getItemIndex(item);
-      
       if (draggedIndex === -1) return;
-      
+
+      didDrop = false;
       isDragging = true;
+      grid.classList.add('reordering');
+
       item.classList.add('dragging');
       item.style.opacity = '0.5';
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/html', item.innerHTML);
+
+      ensurePlaceholder(item);
+      placeholderAnchorNode = item.nextSibling;
+
+      // Better Firefox compatibility
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+
+        const dragImage = item.cloneNode(true);
+        dragImage.style.position = 'absolute';
+        dragImage.style.top = '-9999px';
+        dragImage.style.left = '-9999px';
+        dragImage.style.opacity = '0.9';
+        document.body.appendChild(dragImage);
+        e.dataTransfer.setDragImage(dragImage, dragImage.offsetWidth / 2, dragImage.offsetHeight / 2);
+        setTimeout(() => dragImage.remove(), 0);
+      }
+
+      // Hide original element but keep it as the drag source
+      setTimeout(() => {
+        if (!draggedElement || !placeholder) return;
+        draggedElement.style.display = 'none';
+        if (!placeholder.isConnected) {
+          grid.insertBefore(placeholder, placeholderAnchorNode);
+        }
+      }, 0);
     });
 
     grid.addEventListener('dragover', (e) => {
+      if (!isDragging) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      
-      const item = e.target.closest('.shortcut-item');
-      if (!item || !isDragging) return;
-      
-      // Clear previous over state
-      if (overElement && overElement !== item) {
-        overElement.classList.remove('drag-over');
-      }
-      
-      // Only mark as over if not the dragged item
-      if (item !== draggedElement) {
-        item.classList.add('drag-over');
-        overElement = item;
-      }
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+
+      updatePlaceholderPosition(e.clientX, e.clientY, e.target);
     });
 
     grid.addEventListener('dragleave', (e) => {
       const item = e.target.closest('.shortcut-item');
-      if (item && item !== draggedElement) {
+      if (item && item === overElement) {
         item.classList.remove('drag-over');
-        if (overElement === item) {
-          overElement = null;
-        }
+        overElement = null;
       }
     });
 
-    grid.addEventListener('drop', (e) => {
+    grid.addEventListener('drop', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      
-      const dropTarget = e.target.closest('.shortcut-item');
-      if (!dropTarget || !isDragging || dropTarget === draggedElement) {
-        this.clearDragState(grid);
-        isDragging = false;
-        overElement = null;
+
+      if (!isDragging || !draggedElement || !placeholder) {
+        resetDragState();
         return;
       }
-      
-      const dropIndex = getItemIndex(dropTarget);
-      performReorder(draggedIndex, dropIndex);
-      
-      this.clearDragState(grid);
-      isDragging = false;
-      overElement = null;
+
+      didDrop = true;
+
+      if (!placeholder.isConnected) {
+        grid.insertBefore(placeholder, placeholderAnchorNode);
+      }
+
+      // Place the dragged element at placeholder position
+      placeholder.replaceWith(draggedElement);
+      draggedElement.style.display = '';
+
+      grid.classList.remove('reordering');
+
+      // Persist new order based on the DOM order
+      await persistDomOrder();
+
+      resetDragState();
     });
 
     grid.addEventListener('dragend', () => {
-      this.clearDragState(grid);
-      isDragging = false;
-      overElement = null;
+      if (!isDragging) {
+        resetDragState();
+        return;
+      }
+
+      // Drag canceled (e.g. dropped outside)
+      if (!didDrop) {
+        grid.classList.remove('reordering');
+        renderCallback();
+      }
+
+      resetDragState();
     });
 
-    // Touch support for mobile devices
+    // Touch support for mobile devices (keep existing behavior)
     grid.addEventListener('touchstart', (e) => {
       // Don't allow dragging if clicking on delete button
       if (e.target.closest('.shortcut-delete')) return;
-      
+
       const item = e.target.closest('.shortcut-item');
       if (!item) return;
-      
+
       touchStartTime = Date.now();
       touchItem = item;
     });
 
     grid.addEventListener('touchmove', (e) => {
       if (!touchItem) return;
-      
+
       // Remove delay - start dragging immediately for fluid interaction
       e.preventDefault();
-      
+
       if (!isDragging) {
         isDragging = true;
         draggedElement = touchItem;
@@ -530,12 +707,12 @@ const Widgets = {
         touchItem.classList.add('dragging');
         touchItem.style.opacity = '0.5';
       }
-      
+
       // Find element under touch position
       const touch = e.touches[0];
       const element = document.elementFromPoint(touch.clientX, touch.clientY);
       const item = element?.closest('.shortcut-item');
-      
+
       if (item && item !== touchItem) {
         if (overElement && overElement !== item) {
           overElement.classList.remove('drag-over');
@@ -545,34 +722,44 @@ const Widgets = {
       }
     });
 
-    grid.addEventListener('touchend', (e) => {
+    grid.addEventListener('touchend', () => {
       if (isDragging && overElement && overElement !== draggedElement) {
         const dropIndex = getItemIndex(overElement);
         performReorder(draggedIndex, dropIndex);
       }
-      
+
       touchStartTime = 0;
       touchItem = null;
       this.clearDragState(grid);
       isDragging = false;
       overElement = null;
+      draggedElement = null;
+      draggedIndex = -1;
     });
 
     // Prevent navigation when clicking on shortcuts during drag
     // Use capturing phase to intercept before navigation
-    grid.addEventListener('click', (e) => {
-      const item = e.target.closest('.shortcut-item');
-      if (item && isDragging) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      }
-    }, true);
+    grid.addEventListener(
+      'click',
+      (e) => {
+        const item = e.target.closest('.shortcut-item');
+        if (item && isDragging) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      },
+      true
+    );
   },
 
   clearDragState(grid) {
-    grid.querySelectorAll('.shortcut-item').forEach(item => {
+    grid.classList.remove('reordering');
+    grid.querySelectorAll('.shortcut-placeholder').forEach((el) => el.remove());
+
+    grid.querySelectorAll('.shortcut-item').forEach((item) => {
       item.classList.remove('dragging', 'drag-over');
-      item.style.opacity = '1';
+      item.style.opacity = '';
+      item.style.display = '';
     });
   },
 
