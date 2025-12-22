@@ -427,15 +427,33 @@ const Widgets = {
     const performReorder = async (fromIndex, toIndex) => {
       if (fromIndex === toIndex || fromIndex === -1 || toIndex === -1) return;
 
-      const draggedShortcut = shortcuts[fromIndex];
-      shortcuts.splice(fromIndex, 1);
+      try {
+        const draggedShortcut = shortcuts[fromIndex];
+        shortcuts.splice(fromIndex, 1);
 
-      // Adjust insert index if dragging forward to prevent off-by-one errors
-      const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
-      shortcuts.splice(insertIndex, 0, draggedShortcut);
+        // Adjust insert index if dragging forward to prevent off-by-one errors
+        const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+        shortcuts.splice(insertIndex, 0, draggedShortcut);
 
-      await Storage.set('shortcuts', shortcuts);
-      renderCallback();
+        console.log('快捷方式重排序:', {
+          fromIndex,
+          toIndex,
+          shortcut: draggedShortcut,
+          newArray: shortcuts
+        });
+
+        await Storage.set('shortcuts', shortcuts);
+        
+        // 清理内存缓存
+        if (typeof Storage !== 'undefined') {
+          Storage._memoryCache.delete('shortcuts');
+          Storage._pendingGets.delete('shortcuts');
+        }
+        
+        renderCallback();
+      } catch (error) {
+        console.error('快捷方式重排序失败:', error);
+      }
     };
 
     const getAnimatableItems = () => {
