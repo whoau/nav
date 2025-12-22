@@ -1141,6 +1141,16 @@ const switchSettings = [
         }
       });
     }
+
+    const importBtn = document.getElementById('importDataBtn');
+    if (importBtn && !importBtn.hasAttribute('data-bound')) {
+      importBtn.setAttribute('data-bound', 'true');
+      importBtn.addEventListener('click', () => {
+        this.initImportData();
+      });
+    }
+
+    this.initImportModals();
   },
 
   toggleBgSettings(type) {
@@ -1173,6 +1183,261 @@ const switchSettings = [
     } catch (error) {
       console.error('导出数据失败', error);
       alert('导出失败，请稍后重试。');
+    }
+  },
+
+  // 初始化导入数据功能
+  initImportData() {
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) {
+      fileInput.click();
+    }
+  },
+
+  // 处理文件选择
+  async handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // 验证文件类型
+    if (!file.name.endsWith('.json')) {
+      alert('请选择JSON格式的文件');
+      return;
+    }
+
+    // 验证文件大小 (最大 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('文件过大，请选择小于10MB的文件');
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const importData = JSON.parse(text);
+      
+      // 验证数据格式
+      this.validateImportData(importData);
+      
+      // 显示导入确认对话框
+      this.showImportConfirm(file.name, importData);
+    } catch (error) {
+      console.error('文件解析失败', error);
+      alert('文件格式不正确或已损坏，请检查文件后重试。');
+    } finally {
+      // 清除文件选择，允许重复选择同一文件
+      event.target.value = '';
+    }
+  },
+
+  // 验证导入数据格式
+  validateImportData(data) {
+    if (!data || typeof data !== 'object') {
+      throw new Error('文件格式不正确');
+    }
+
+    if (!data.meta || !data.data) {
+      throw new Error('文件缺少必要的元数据或数据部分');
+    }
+
+    if (data.meta.schema !== 'mytab-export-v1') {
+      throw new Error('不支持的导出文件格式版本');
+    }
+
+    if (!data.data || typeof data.data !== 'object') {
+      throw new Error('数据部分格式不正确');
+    }
+  },
+
+  // 显示导入确认对话框
+  showImportConfirm(fileName, importData) {
+    const modal = document.getElementById('importConfirmModal');
+    const fileNameSpan = document.getElementById('importFileName');
+    
+    if (modal && fileNameSpan) {
+      fileNameSpan.textContent = fileName;
+      modal.dataset.importData = JSON.stringify(importData);
+      this.showModal(modal);
+    }
+  },
+
+  // 初始化导入相关模态框
+  initImportModals() {
+    // 导入确认对话框关闭事件
+    const closeImportConfirmBtn = document.getElementById('closeImportConfirmModalBtn');
+    if (closeImportConfirmBtn) {
+      closeImportConfirmBtn.addEventListener('click', () => {
+        this.hideModal('importConfirmModal');
+      });
+    }
+
+    // 取消导入按钮
+    const cancelImportBtn = document.getElementById('cancelImportBtn');
+    if (cancelImportBtn) {
+      cancelImportBtn.addEventListener('click', () => {
+        this.hideModal('importConfirmModal');
+      });
+    }
+
+    // 确认导入按钮
+    const confirmImportBtn = document.getElementById('confirmImportBtn');
+    if (confirmImportBtn) {
+      confirmImportBtn.addEventListener('click', async () => {
+        await this.processImport();
+      });
+    }
+
+    // 文件输入事件
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) {
+      fileInput.addEventListener('change', (event) => {
+        this.handleFileSelect(event);
+      });
+    }
+
+    // 点击模态框背景关闭
+    const importModal = document.getElementById('importConfirmModal');
+    if (importModal) {
+      importModal.addEventListener('click', (event) => {
+        if (event.target === importModal) {
+          this.hideModal('importConfirmModal');
+        }
+      });
+    }
+  },
+
+  // 处理数据导入
+  async processImport() {
+    const modal = document.getElementById('importConfirmModal');
+    const confirmBtn = document.getElementById('confirmImportBtn');
+    
+    if (!modal || !confirmBtn) return;
+
+    const importDataStr = modal.dataset.importData;
+    if (!importDataStr) {
+      alert('导入数据丢失，请重新选择文件');
+      return;
+    }
+
+    let importData;
+    try {
+      importData = JSON.parse(importDataStr);
+    } catch (error) {
+      alert('导入数据格式错误');
+      return;
+    }
+
+    // 获取导入模式
+    const importMode = document.querySelector('input[name="importMode"]:checked')?.value || 'replace';
+
+    // 设置加载状态
+    confirmBtn.classList.add('loading');
+    confirmBtn.disabled = true;
+
+    try {
+      // 执行导入
+      await Storage.importData(importData, importMode);
+      
+      // 隐藏对话框
+      this.hideModal('importConfirmModal');
+      
+      // 重新加载数据并更新界面
+      await this.loadData();
+      await this.migrateShortcutsData();
+      
+      // 更新界面显示
+      this.renderShortcuts();
+      this.applySettings(this.data.settings);
+      
+      // 显示成功提示
+      this.showNotification('数据导入成功！', 'success');
+      
+    } catch (error) {
+      console.error('导入失败', error);
+      alert(`导入失败：${error.message}`);
+    } finally {
+      // 清除加载状态
+      confirmBtn.classList.remove('loading');
+      confirmBtn.disabled = false;
+    }
+  },
+
+  // 显示模态框
+  showModal(modal) {
+    if (modal) {
+      modal.classList.add('show');
+    }
+  },
+
+  // 隐藏模态框
+  hideModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      modal.classList.remove('show');
+      // 清除保存的导入数据
+      delete modal.dataset.importData;
+    }
+  },
+
+  // 显示通知
+  showNotification(message, type = 'info') {
+    // 创建通知元素
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+      <div class="notification-content">
+        <span class="notification-message">${message}</span>
+        <button class="notification-close">&times;</button>
+      </div>
+    `;
+
+    // 添加样式
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: ${type === 'success' ? '#10B981' : type === 'error' ? '#EF4444' : '#3B82F6'};
+      color: white;
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      z-index: 10000;
+      opacity: 0;
+      transform: translateX(100%);
+      transition: all 0.3s ease;
+      max-width: 300px;
+      font-size: 13px;
+    `;
+
+    document.body.appendChild(notification);
+
+    // 显示动画
+    setTimeout(() => {
+      notification.style.opacity = '1';
+      notification.style.transform = 'translateX(0)';
+    }, 10);
+
+    // 关闭按钮事件
+    const closeBtn = notification.querySelector('.notification-close');
+    closeBtn.addEventListener('click', () => {
+      this.hideNotification(notification);
+    });
+
+    // 自动关闭
+    setTimeout(() => {
+      this.hideNotification(notification);
+    }, 5000);
+  },
+
+  // 隐藏通知
+  hideNotification(notification) {
+    if (notification) {
+      notification.style.opacity = '0';
+      notification.style.transform = 'translateX(100%)';
+      setTimeout(() => {
+        if (notification.parentNode) {
+          notification.parentNode.removeChild(notification);
+        }
+      }, 300);
     }
   },
 

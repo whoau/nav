@@ -367,6 +367,16 @@
                 <span>导出数据</span>
               </button>
             </div>
+            <div class="setting-item setting-item-column">
+              <div class="setting-item-info">
+                <label>导入数据</label>
+                <p class="setting-hint">从JSON文件导入之前导出的数据，可选择覆盖或合并现有数据。</p>
+              </div>
+              <button class="btn btn-secondary settings-action-btn" id="importDataBtn" type="button">
+                <i class="fas fa-file-import"></i>
+                <span>导入数据</span>
+              </button>
+            </div>
           </div>
 
           <!-- 关于 -->
@@ -501,6 +511,46 @@
         </div>
       </div>
     </div>
+
+    <!-- 导入确认对话框 -->
+    <div class="modal" id="importConfirmModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-file-import"></i> 导入数据</h3>
+          <button class="close-btn" id="closeImportConfirmModalBtn">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="import-info">
+            <p>已选择文件：<span id="importFileName"></span></p>
+            <div class="import-options">
+              <h4>选择导入方式：</h4>
+              <div class="radio-group">
+                <label class="radio-option">
+                  <input type="radio" name="importMode" value="replace" id="importReplace" checked>
+                  <span><strong>覆盖导入</strong><br><small>导入的数据将完全替换现有数据</small></span>
+                </label>
+                <label class="radio-option">
+                  <input type="radio" name="importMode" value="merge" id="importMerge">
+                  <span><strong>合并导入</strong><br><small>导入的数据将追加到现有数据后面</small></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelImportBtn">取消</button>
+          <button class="btn btn-primary" id="confirmImportBtn">
+            <i class="fas fa-file-import"></i>
+            开始导入
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 隐藏的文件输入 -->
+    <input type="file" id="fileInput" accept=".json" style="display: none;">
 
     <!-- 电影详情弹窗 
     <div class="modal" id="movieModal">
