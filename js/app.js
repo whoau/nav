@@ -72,6 +72,67 @@ const App = {
     }
   },
 
+  // 渲染快捷方式列表
+  renderShortcuts() {
+    const grid = document.getElementById('shortcutsGrid');
+    if (!grid) return;
+    
+    const shortcuts = this.data.shortcuts || [];
+    
+    grid.innerHTML = shortcuts.map((shortcut, index) => {
+      const name = shortcut.name || '';
+      const url = shortcut.url || '';
+
+      const firstChar = Array.from(name.trim())[0] || '?';
+      const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
+
+      const iconValue = shortcut.icon || 'default';
+      const customColor = shortcut.color || '';
+
+      const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
+      const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
+      const iconText = isTextIcon ? iconValue : initial;
+      const multiClass = Array.from(iconText).length > 1 ? ' multi' : '';
+
+      let domain = '';
+      try {
+        domain = new URL(url).hostname;
+      } catch {
+        domain = url;
+      }
+
+      const faviconUrl = typeof API !== 'undefined' && typeof API.getFaviconUrl === 'function'
+        ? API.getFaviconUrl(url)
+        : `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`;
+
+      let iconMarkup = '';
+      if (isTextIcon) {
+        iconMarkup = `<div class="shortcut-icon-fallback${multiClass}">${iconText}</div>`;
+      } else {
+        const imgSrc = isDataIcon ? iconValue : faviconUrl;
+        iconMarkup = `
+          <img src="${imgSrc}" alt="${name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+          <div class="shortcut-icon-fallback${multiClass}" style="display: none;">${iconText}</div>
+        `;
+      }
+
+      return `
+        <a href="${url}" class="shortcut-item" data-index="${index}" draggable="true" ${customColor ? `style="--shortcut-icon-color: ${customColor}"` : ''}>
+          <button class="shortcut-delete" data-index="${index}">
+            <i class="fas fa-times"></i>
+          </button>
+          <div class="shortcut-icon">
+            ${iconMarkup}
+          </div>
+          <span class="shortcut-name">${name}</span>
+        </a>
+      `;
+    }).join('');
+
+    // 初始化拖拽功能
+    Widgets.initShortcutsDragDrop(grid, shortcuts, () => this.renderShortcuts());
+  },
+
   // 初始化壁纸库
   async initWallpaperLibrary() {
     try {
@@ -449,64 +510,10 @@ const App = {
     const saveBtn = document.getElementById('saveShortcutBtn');
     
     if (!grid) return;
-    
+
     let shortcuts = this.data.shortcuts || [];
 
-    const renderShortcuts = () => {
-      grid.innerHTML = shortcuts.map((shortcut, index) => {
-        const name = shortcut.name || '';
-        const url = shortcut.url || '';
-
-        const firstChar = Array.from(name.trim())[0] || '?';
-        const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
-
-        const iconValue = shortcut.icon || 'default';
-        const customColor = shortcut.color || '';
-
-        const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
-        const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
-        const iconText = isTextIcon ? iconValue : initial;
-        const multiClass = Array.from(iconText).length > 1 ? ' multi' : '';
-
-        let domain = '';
-        try {
-          domain = new URL(url).hostname;
-        } catch {
-          domain = url;
-        }
-
-        const faviconUrl = typeof API !== 'undefined' && typeof API.getFaviconUrl === 'function'
-          ? API.getFaviconUrl(url)
-          : `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`;
-
-        let iconMarkup = '';
-        if (isTextIcon) {
-          iconMarkup = `<div class="shortcut-icon-fallback${multiClass}">${iconText}</div>`;
-        } else {
-          const imgSrc = isDataIcon ? iconValue : faviconUrl;
-          iconMarkup = `
-            <img src="${imgSrc}" alt="${name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-            <div class="shortcut-icon-fallback${multiClass}" style="display: none;">${iconText}</div>
-          `;
-        }
-
-        return `
-          <a href="${url}" class="shortcut-item" data-index="${index}" draggable="true" ${customColor ? `style="--shortcut-icon-color: ${customColor}"` : ''}>
-            <button class="shortcut-delete" data-index="${index}">
-              <i class="fas fa-times"></i>
-            </button>
-            <div class="shortcut-icon">
-              ${iconMarkup}
-            </div>
-            <span class="shortcut-name">${name}</span>
-          </a>
-        `;
-      }).join('');
-
-      Widgets.initShortcutsDragDrop(grid, shortcuts, renderShortcuts);
-    };
-
-    renderShortcuts();
+    this.renderShortcuts();
 
     // 删除快捷方式
     grid.addEventListener('click', async (e) => {
@@ -517,8 +524,9 @@ const App = {
         e.stopPropagation();
         const index = parseInt(deleteBtn.dataset.index);
         shortcuts.splice(index, 1);
+        this.data.shortcuts = shortcuts;
         await Storage.set('shortcuts', shortcuts);
-        renderShortcuts();
+        this.renderShortcuts();
       }
     });
 
@@ -563,8 +571,9 @@ const App = {
         }
         
         shortcuts.push({ name, url });
+        this.data.shortcuts = shortcuts;
         await Storage.set('shortcuts', shortcuts);
-        renderShortcuts();
+        this.renderShortcuts();
         closeModal();
       });
     }
@@ -789,8 +798,9 @@ const App = {
         }
 
         shortcuts[editingIndex] = updatedShortcut;
+        this.data.shortcuts = shortcuts;
         await Storage.set('shortcuts', shortcuts);
-        renderShortcuts();
+        this.renderShortcuts();
         closeEditModal();
       });
     }
