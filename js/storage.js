@@ -240,6 +240,190 @@ const Storage = {
     };
   },
 
+  async importData(importData, mode = 'replace') {
+    if (!importData || typeof importData !== 'object') {
+      throw new Error('无效的导入数据格式');
+    }
+
+    // 验证数据结构
+    this._validateImportData(importData);
+
+    const data = importData.data;
+    const currentData = await this.getAll();
+
+    if (mode === 'replace') {
+      // 覆盖模式：完全替换现有数据
+      await this._importReplace(data);
+    } else if (mode === 'merge') {
+      // 合并模式：合并数据
+      await this._importMerge(data, currentData);
+    } else {
+      throw new Error('未知的导入模式');
+    }
+
+    // 清除内存缓存，确保数据一致性
+    this._memoryCache.clear();
+    this._pendingGets.clear();
+  },
+
+  _validateImportData(importData) {
+    if (!importData.meta || !importData.data) {
+      throw new Error('导入文件格式不正确，缺少必要的元数据或数据部分');
+    }
+
+    if (importData.meta.schema !== 'mytab-export-v1') {
+      throw new Error('不支持的导出文件格式版本');
+    }
+
+    if (!importData.data || typeof importData.data !== 'object') {
+      throw new Error('导入文件的数据部分格式不正确');
+    }
+
+    // 验证必要的数据字段
+    const requiredFields = ['settings', 'shortcuts', 'bookmarks', 'todos', 'notes', 'searchEngine'];
+    for (const field of requiredFields) {
+      if (!importData.data.hasOwnProperty(field)) {
+        console.warn(`导入数据缺少字段: ${field}，将使用默认值`);
+      }
+    }
+  },
+
+  async _importReplace(data) {
+    try {
+      // 导入设置
+      if (data.settings) {
+        await this.set('settings', { ...this.defaults.settings, ...data.settings });
+      }
+
+      // 导入快捷方式
+      if (data.shortcuts) {
+        await this.set('shortcuts', data.shortcuts);
+      }
+
+      // 导入书签
+      if (data.bookmarks) {
+        await this.set('bookmarks', data.bookmarks);
+      }
+
+      // 导入待办事项
+      if (data.todos) {
+        await this.set('todos', data.todos);
+      }
+
+      // 导入笔记
+      if (data.notes) {
+        await this.set('notes', data.notes);
+      }
+
+      // 导入搜索引擎
+      if (data.searchEngine) {
+        await this.set('searchEngine', data.searchEngine);
+      }
+
+      // 导入壁纸相关数据
+      if (data.wallpaper) {
+        if (data.wallpaper.current) {
+          await this.set('currentWallpaper', data.wallpaper.current);
+        }
+        if (data.wallpaper.history) {
+          await this.set('wallpaperHistory', data.wallpaper.history);
+        }
+        if (data.wallpaper.lastChangedAt) {
+          await this.set('lastWallpaperChange', data.wallpaper.lastChangedAt);
+        }
+      }
+
+      // 导入谚语相关数据
+      if (data.proverb) {
+        if (data.proverb.today) {
+          await this.set('proverbCache', data.proverb.today);
+        }
+        if (data.proverb.lastUpdated) {
+          await this.set('proverbCacheDate', data.proverb.lastUpdated);
+        }
+        if (data.proverb.history) {
+          await this.set('proverbHistory', data.proverb.history);
+        }
+      }
+
+    } catch (error) {
+      throw new Error(`数据导入失败: ${error.message}`);
+    }
+  },
+
+  async _importMerge(data, currentData) {
+    try {
+      // 设置直接覆盖（因为设置通常是完整的配置）
+      if (data.settings) {
+        await this.set('settings', { ...this.defaults.settings, ...data.settings });
+      }
+
+      // 快捷方式合并
+      if (data.shortcuts && Array.isArray(data.shortcuts)) {
+        const currentShortcuts = currentData.shortcuts || [];
+        const mergedShortcuts = [...currentShortcuts, ...data.shortcuts];
+        await this.set('shortcuts', mergedShortcuts);
+      }
+
+      // 书签合并
+      if (data.bookmarks && Array.isArray(data.bookmarks)) {
+        const currentBookmarks = currentData.bookmarks || [];
+        const mergedBookmarks = [...currentBookmarks, ...data.bookmarks];
+        await this.set('bookmarks', mergedBookmarks);
+      }
+
+      // 待办事项合并
+      if (data.todos && Array.isArray(data.todos)) {
+        const currentTodos = currentData.todos || [];
+        const mergedTodos = [...currentTodos, ...data.todos];
+        await this.set('todos', mergedTodos);
+      }
+
+      // 笔记直接覆盖（通常只有一份）
+      if (data.notes) {
+        await this.set('notes', data.notes);
+      }
+
+      // 搜索引擎直接覆盖
+      if (data.searchEngine) {
+        await this.set('searchEngine', data.searchEngine);
+      }
+
+      // 壁纸相关数据合并
+      if (data.wallpaper) {
+        if (data.wallpaper.current) {
+          await this.set('currentWallpaper', data.wallpaper.current);
+        }
+        if (data.wallpaper.history) {
+          const currentHistory = currentData.wallpaperHistory || [];
+          const mergedHistory = [...currentHistory, ...data.wallpaper.history];
+          await this.set('wallpaperHistory', mergedHistory);
+        }
+        if (data.wallpaper.lastChangedAt) {
+          await this.set('lastWallpaperChange', data.wallpaper.lastChangedAt);
+        }
+      }
+
+      // 谚语相关数据合并
+      if (data.proverb) {
+        if (data.proverb.today) {
+          await this.set('proverbCache', data.proverb.today);
+        }
+        if (data.proverb.lastUpdated) {
+          await this.set('proverbCacheDate', data.proverb.lastUpdated);
+        }
+        if (data.proverb.history) {
+          const currentHistory = currentData.proverbHistory || [];
+          const mergedHistory = [...currentHistory, ...data.proverb.history];
+          await this.set('proverbHistory', mergedHistory);
+        }
+      }
+
+    } catch (error) {
+      throw new Error(`数据合并失败: ${error.message}`);
+    }
+  },
+
   async clear() {
     this._memoryCache.clear();
     this._pendingGets.clear();
