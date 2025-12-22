@@ -52,23 +52,39 @@ const App = {
     let shortcuts = this.data.shortcuts || [];
     let hasChanges = false;
     
-    shortcuts = shortcuts.map(shortcut => {
+    console.log('开始迁移快捷方式数据，当前数量:', shortcuts.length);
+    
+    shortcuts = shortcuts.map((shortcut, index) => {
+      const original = { ...shortcut };
+      
       // 如果快捷方式缺少新的属性，添加默认值
       if (!shortcut.hasOwnProperty('icon')) {
         shortcut.icon = 'default';
         hasChanges = true;
+        console.log(`快捷方式 ${index} 缺少 icon 属性，设置为默认值`);
       }
       if (!shortcut.hasOwnProperty('color')) {
         shortcut.color = '';
         hasChanges = true;
+        console.log(`快捷方式 ${index} 缺少 color 属性，设置为默认值`);
       }
+      
       return shortcut;
     });
     
     // 如果有变更，保存更新后的数据
     if (hasChanges) {
+      console.log('快捷方式数据有变更，正在保存...');
       await Storage.set('shortcuts', shortcuts);
+      
+      // 清理内存缓存
+      Storage._memoryCache.delete('shortcuts');
+      Storage._pendingGets.delete('shortcuts');
+      
       this.data.shortcuts = shortcuts;
+      console.log('快捷方式数据迁移完成并保存');
+    } else {
+      console.log('快捷方式数据无需迁移');
     }
   },
 
@@ -523,10 +539,27 @@ const App = {
         e.preventDefault();
         e.stopPropagation();
         const index = parseInt(deleteBtn.dataset.index);
-        shortcuts.splice(index, 1);
-        this.data.shortcuts = shortcuts;
-        await Storage.set('shortcuts', shortcuts);
-        this.renderShortcuts();
+        
+        try {
+          shortcuts.splice(index, 1);
+          this.data.shortcuts = shortcuts;
+          
+          console.log('删除快捷方式:', {
+            index: index,
+            remainingShortcuts: shortcuts
+          });
+          
+          await Storage.set('shortcuts', shortcuts);
+          
+          // 清理内存缓存
+          Storage._memoryCache.delete('shortcuts');
+          Storage._pendingGets.delete('shortcuts');
+          
+          this.renderShortcuts();
+        } catch (error) {
+          console.error('删除快捷方式失败:', error);
+          alert('删除失败，请重试');
+        }
       }
     });
 
@@ -570,11 +603,32 @@ const App = {
           url = 'https://' + url;
         }
         
-        shortcuts.push({ name, url });
-        this.data.shortcuts = shortcuts;
-        await Storage.set('shortcuts', shortcuts);
-        this.renderShortcuts();
-        closeModal();
+        try {
+          shortcuts.push({ 
+            name, 
+            url,
+            icon: 'default',  // 默认图标
+            color: ''         // 默认颜色
+          });
+          this.data.shortcuts = shortcuts;
+          
+          console.log('添加快捷方式:', {
+            shortcut: { name, url, icon: 'default', color: '' },
+            fullArray: shortcuts
+          });
+          
+          await Storage.set('shortcuts', shortcuts);
+          
+          // 清理内存缓存
+          Storage._memoryCache.delete('shortcuts');
+          Storage._pendingGets.delete('shortcuts');
+          
+          this.renderShortcuts();
+          closeModal();
+        } catch (error) {
+          console.error('添加快捷方式失败:', error);
+          alert('添加失败，请重试');
+        }
       });
     }
 
@@ -797,11 +851,34 @@ const App = {
           updatedShortcut.color = '';
         }
 
-        shortcuts[editingIndex] = updatedShortcut;
-        this.data.shortcuts = shortcuts;
-        await Storage.set('shortcuts', shortcuts);
-        this.renderShortcuts();
-        closeEditModal();
+        try {
+          // 更新快捷方式数组
+          shortcuts[editingIndex] = updatedShortcut;
+          this.data.shortcuts = shortcuts;
+          
+          console.log('保存快捷方式编辑:', {
+            index: editingIndex,
+            shortcut: updatedShortcut,
+            fullArray: shortcuts
+          });
+          
+          // 保存到存储
+          await Storage.set('shortcuts', shortcuts);
+          
+          // 清理内存缓存，确保下次读取时获取最新数据
+          Storage._memoryCache.delete('shortcuts');
+          Storage._pendingGets.delete('shortcuts');
+          
+          console.log('快捷方式已保存，重新渲染UI');
+          
+          // 重新渲染UI
+          this.renderShortcuts();
+          closeEditModal();
+          
+        } catch (error) {
+          console.error('保存快捷方式失败:', error);
+          alert('保存失败，请重试');
+        }
       });
     }
 
