@@ -235,12 +235,11 @@ const API = {
   getFaviconUrl(pageUrl, { size = 64, scaleFactor = 2 } = {}) {
     try {
       const url = new URL(pageUrl);
-      if (typeof chrome !== 'undefined' && chrome.runtime && (url.protocol === 'http:' || url.protocol === 'https:')) {
-        return `chrome://favicon2/?size=${size}&scale_factor=${scaleFactor}x&page_url=${encodeURIComponent(url.href)}`;
-      }
+      //  Favicon API，避免统一使用 Google 的 CSP 违规
       return `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(url.hostname)}`;
     } catch {
-      return `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(pageUrl || '')}`;
+      // 解析失败时使用默认图标
+      return `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(pageUrl || 'default')}`;
     }
   },
 
