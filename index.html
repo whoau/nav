@@ -21,34 +21,43 @@
     </div>
     
     <!-- 壁纸控制按钮组 -->
-
-<div class="wallpaper-controls" id="wallpaperControls">
-  <button class="wallpaper-btn" id="prevWallpaperBtn" title="上一张">
-    <i class="fas fa-chevron-left"></i>
-  </button>
-  <button class="wallpaper-btn" id="refreshBgBtn" title="随机换一张">
-    <i class="fas fa-random"></i>
-  </button>
-  <button class="wallpaper-btn" id="nextWallpaperBtn" title="下一张">
-    <i class="fas fa-chevron-right"></i>
-  </button>
-</div>
-
-<!-- 壁纸信息 -->
-<div id="bgInfo" class="bg-info"></div>
+    <div class="wallpaper-controls" id="wallpaperControls">
+      <button class="wallpaper-btn" id="prevWallpaperBtn" title="上一张">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      </button>
+      <button class="wallpaper-btn" id="refreshBgBtn" title="随机换一张">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
+      </button>
+      <button class="wallpaper-btn" id="nextWallpaperBtn" title="下一张">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    </div>
 
     <!-- 壁纸信息 -->
     <div id="bgInfo" class="bg-info"></div>
-    
+
     <!-- 顶部工具栏 -->
     <header class="top-bar">
       <div class="left-section">
-        <span id="clock" class="clock"></span>
-        <span id="date" class="date"></span>
+        <div class="logo">
+          <img src="icons/mytab-48.png" alt="MyTab Logo" class="logo-icon">
+          <span class="logo-text">MyTab</span>
+        </div>
+        <div class="top-bar-divider"></div>
+        <div class="time-info">
+          <span id="clock" class="clock"></span>
+          <span id="date" class="date"></span>
+        </div>
       </div>
       <div class="right-section">
+        <button id="importDataBtnNav" class="icon-btn" title="导入数据">
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button id="exportDataBtnNav" class="icon-btn" title="导出数据">
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>
         <button id="settingsBtn" class="icon-btn" title="设置">
-          <i class="fas fa-cog"></i>
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
       </div>
     </header>
@@ -63,11 +72,11 @@
         <div class="search-box">
           <div class="search-engine-selector" id="engineSelector">
             <img id="currentEngineIcon" src="" alt="搜索引擎">
-            <i class="fas fa-chevron-down"></i>
+            <svg class="icon-svg chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </div>
           <input type="text" id="searchInput" placeholder="搜索或输入网址" autocomplete="off">
           <button id="searchBtn" class="search-btn">
-            <i class="fas fa-search"></i>
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           </button>
         </div>
         <!-- 搜索引擎下拉菜单 -->
@@ -99,7 +108,7 @@
       <div class="shortcuts-container">
         <div class="shortcuts-grid" id="shortcutsGrid"></div>
         <button class="add-shortcut-btn" id="addShortcutBtn">
-          <i class="fas fa-plus"></i>
+          <svg class="icon-svg add-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           <span>添加快捷方式</span>
         </button>
       </div>
@@ -198,9 +207,12 @@
     <div class="settings-panel" id="settingsPanel">
       <div class="settings-content">
         <div class="settings-header">
-          <h2><i class="fas fa-cog"></i> 设置</h2>
+          <h2>
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            设置
+          </h2>
           <button class="close-btn" id="closeSettingsBtn">
-            <i class="fas fa-times"></i>
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
         
@@ -368,7 +380,7 @@
                 <p class="setting-hint">一键导出书签、快捷方式、待办、笔记、壁纸与谚语历史等用户数据。</p>
               </div>
               <button class="btn btn-primary settings-action-btn" id="exportDataBtn" type="button">
-                <i class="fas fa-file-export"></i>
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 <span>导出数据</span>
               </button>
             </div>
@@ -378,7 +390,7 @@
                 <p class="setting-hint">从JSON文件导入之前导出的数据，可选择覆盖或合并现有数据。</p>
               </div>
               <button class="btn btn-secondary settings-action-btn" id="importDataBtn" type="button">
-                <i class="fas fa-file-import"></i>
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 <span>导入数据</span>
               </button>
             </div>
