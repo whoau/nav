@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Favicon Loading Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .test-result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        .icon-display {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .icon-img {
+            width: 32px;
+            height: 32px;
+            border: 1px solid #ddd;
+        }
+        .fallback-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Favicon Loading Test</h1>
+        
+        <div class="test-section">
+            <h2>Test 1: API Module Availability</h2>
+            <div class="test-result" id="apiTest"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Test 2: Favicon URL Generation</h2>
+            <div class="test-result" id="urlTest"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Test 3: Icon Cache Methods</h2>
+            <div class="test-result" id="cacheTest"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Test 4: Fallback Icon Generation</h2>
+            <div class="test-result" id="fallbackTest"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Test 5: Sample Icons</h2>
+            <div id="sampleIcons"></div>
+        </div>
+    </div>
+
+    <script>
+        // Mock Storage for testing
+        const Storage = {
+            async get(key) {
+                return localStorage.getItem(key);
+            },
+            async set(key, value) {
+                localStorage.setItem(key, JSON.stringify(value));
+            }
+        };
+
+        // Test API module
+        const API = {
+            iconCache: {
+                PREFERRED_SOURCE_KEY: 'iconPreferredSources',
+                ICON_DATA_CACHE_KEY: 'iconDataCache',
+                
+                async getPreferredSource(hostname) {
+                    const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
+                    return cache[hostname] || null;
+                },
+                
+                async savePreferredSource(hostname, sourceIndex) {
+                    const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
+                    cache[hostname] = {
+                        index: sourceIndex,
+                        lastSuccess: Date.now()
+                    };
+                    await Storage.set(this.PREFERRED_SOURCE_KEY, cache);
+                },
+                
+                async getCachedIcon(hostname) {
+                    const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
+                    return cache[hostname] || null;
+                },
+                
+                async cacheIcon(hostname, dataUrl) {
+                    const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
+                    cache[hostname] = dataUrl;
+                    await Storage.set(this.ICON_DATA_CACHE_KEY, cache);
+                    console.log(`图标已缓存 - 域名: ${hostname}`);
+                }
+            },
+            
+            getFaviconUrls(pageUrl, { size = 64 } = {}) {
+                let hostname = '';
+                try {
+                    hostname = new URL(pageUrl).hostname;
+                } catch {
+                    hostname = pageUrl || 'default';
+                }
+                
+                return [
+                    `https://${hostname}/favicon.ico`,
+                    `https://icons.duckduckgo.com/ip3/${encodeURIComponent(hostname)}.ico`,
+                    `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(hostname)}`,
+                    `https://api.faviconkit.com/${encodeURIComponent(hostname)}/${size}`
+                ];
+            }
+        };
+
+        // Run tests
+        async function runTests() {
+            // Test 1: API Module Availability
+            try {
+                if (typeof API !== 'undefined' && API.iconCache) {
+                    document.getElementById('apiTest').innerHTML = '<span class="success">✅ API module available</span>';
+                } else {
+                    document.getElementById('apiTest').innerHTML = '<span class="error">❌ API module not available</span>';
+                }
+            } catch (error) {
+                document.getElementById('apiTest').innerHTML = '<span class="error">❌ Error: ' + error.message + '</span>';
+            }
+
+            // Test 2: Favicon URL Generation
+            try {
+                const urls = API.getFaviconUrls('https://google.com');
+                const urlsHTML = urls.map((url, index) => `<div>Source ${index}: ${url}</div>`).join('');
+                document.getElementById('urlTest').innerHTML = '<span class="success">✅ URL generation works</span><div>' + urlsHTML + '</div>';
+            } catch (error) {
+                document.getElementById('urlTest').innerHTML = '<span class="error">❌ Error: ' + error.message + '</span>';
+            }
+
+            // Test 3: Icon Cache Methods
+            try {
+                await API.iconCache.cacheIcon('test.com', 'data:image/png;base64,test');
+                const cached = await API.iconCache.getCachedIcon('test.com');
+                if (cached === 'data:image/png;base64,test') {
+                    document.getElementById('cacheTest').innerHTML = '<span class="success">✅ Cache methods work</span>';
+                } else {
+                    document.getElementById('cacheTest').innerHTML = '<span class="error">❌ Cache retrieval failed</span>';
+                }
+            } catch (error) {
+                document.getElementById('cacheTest').innerHTML = '<span class="error">❌ Error: ' + error.message + '</span>';
+            }
+
+            // Test 4: Fallback Icon Generation
+            try {
+                const testCases = [
+                    { name: 'Google', expected: 'G' },
+                    { name: '百度', expected: '百' },
+                    { name: '123', expected: '1' },
+                    { name: '', expected: '?' }
+                ];
+                
+                const results = testCases.map(test => {
+                    const firstChar = Array.from(test.name.trim())[0] || '?';
+                    const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
+                    const success = initial === test.expected;
+                    return `<div>${test.name} → ${initial} ${success ? '✅' : '❌'}</div>`;
+                }).join('');
+                
+                document.getElementById('fallbackTest').innerHTML = '<span class="success">✅ Fallback generation works</span><div>' + results + '</div>';
+            } catch (error) {
+                document.getElementById('fallbackTest').innerHTML = '<span class="error">❌ Error: ' + error.message + '</span>';
+            }
+
+            // Test 5: Sample Icons
+            try {
+                const sampleUrls = [
+                    'https://google.com',
+                    'https://github.com',
+                    'https://baidu.com',
+                    'https://nonexistent-website-12345.com'
+                ];
+                
+                const iconsHTML = sampleUrls.map(url => {
+                    try {
+                        const hostname = new URL(url).hostname;
+                        const firstChar = Array.from(hostname)[0] || '?';
+                        const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
+                        return `
+                            <div class="icon-display">
+                                <div class="fallback-icon">${initial}</div>
+                                <span>${hostname}</span>
+                            </div>
+                        `;
+                    } catch {
+                        return `<div class="icon-display"><div class="fallback-icon">?</div><span>Invalid URL</span></div>`;
+                    }
+                }).join('');
+                
+                document.getElementById('sampleIcons').innerHTML = iconsHTML;
+            } catch (error) {
+                document.getElementById('sampleIcons').innerHTML = '<span class="error">❌ Error: ' + error.message + '</span>';
+            }
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

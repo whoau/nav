@@ -235,6 +235,7 @@ const API = {
   // 图标缓存管理
   iconCache: {
     PREFERRED_SOURCE_KEY: 'iconPreferredSources',
+    ICON_DATA_CACHE_KEY: 'iconDataCache',
     
     // 获取域名的首选图标源
     async getPreferredSource(hostname) {
@@ -250,6 +251,20 @@ const API = {
         lastSuccess: Date.now()
       };
       await Storage.set(this.PREFERRED_SOURCE_KEY, cache);
+    },
+    
+    // 获取缓存的图标数据URL
+    async getCachedIcon(hostname) {
+      const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
+      return cache[hostname] || null;
+    },
+    
+    // 缓存图标数据URL
+    async cacheIcon(hostname, dataUrl) {
+      const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
+      cache[hostname] = dataUrl;
+      await Storage.set(this.ICON_DATA_CACHE_KEY, cache);
+      console.log(`图标已缓存 - 域名: ${hostname}`);
     },
     
     // 清理7天前的记录
@@ -269,6 +284,27 @@ const API = {
       if (changed) {
         await Storage.set(this.PREFERRED_SOURCE_KEY, cache);
       }
+    },
+    
+    // 清理过期的图标数据缓存
+    async cleanupIconDataCache() {
+      const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
+      const now = Date.now();
+      const TTL = 30 * 24 * 60 * 60 * 1000; // 30天
+      let changed = false;
+      
+      for (const [hostname, dataUrl] of Object.entries(cache)) {
+        // 简单检查：如果数据URL看起来无效，清理它
+        if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+          delete cache[hostname];
+          changed = true;
+        }
+      }
+      
+      if (changed) {
+        await Storage.set(this.ICON_DATA_CACHE_KEY, cache);
+        console.log('图标数据缓存清理完成');
+      }
     }
   },
 
@@ -282,18 +318,19 @@ const API = {
     }
     
     // 返回多个备选源，按优先级排序
+    // 优先使用国内可访问的服务，避免被墙的问题
     return [
-      // 源1: Google Favicon API（最可靠）
-      `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(hostname)}`,
+      // 源1: 网站自身的 favicon.ico（最直接，无需第三方服务）
+      `https://${hostname}/favicon.ico`,
       
       // 源2: DuckDuckGo Favicon（无需代理，国内可访问）
       `https://icons.duckduckgo.com/ip3/${encodeURIComponent(hostname)}.ico`,
       
-      // 源3: Favicon Kit（备选服务）
-      `https://api.faviconkit.com/${encodeURIComponent(hostname)}/${size}`,
+      // 源3: Google Favicon API（可能被墙，但保留作为备选）
+      `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(hostname)}`,
       
-      // 源4: 网站自身的 favicon.ico
-      `https://${hostname}/favicon.ico`
+      // 源4: Favicon Kit（备选服务，可能被墙）
+      `https://api.faviconkit.com/${encodeURIComponent(hostname)}/${size}`
     ];
   },
   

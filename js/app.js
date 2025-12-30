@@ -46,6 +46,7 @@ const App = {
     try {
       if (typeof API !== 'undefined' && API.iconCache) {
         await API.iconCache.cleanup();
+        await API.iconCache.cleanupIconDataCache();
         console.log('图标缓存清理完成');
       }
     } catch (error) {
@@ -170,6 +171,9 @@ const App = {
     
     // 初始化多源图标加载
     this.initMultiSourceIcons();
+
+    // 初始化书签图标加载
+    this.initBookmarkIcons();
   },
   
   // 生成多源备选图标的HTML
@@ -197,6 +201,17 @@ const App = {
       
       if (sources.length === 0) continue;
       
+      // 优先检查本地缓存
+      if (typeof API !== 'undefined' && API.iconCache) {
+        const cachedIcon = await API.iconCache.getCachedIcon(hostname);
+        if (cachedIcon) {
+          console.log(`使用缓存图标 - 域名: ${hostname}`);
+          img.src = cachedIcon;
+          img.style.display = 'block';
+          continue; // 跳过网络加载
+        }
+      }
+      
       // 检查是否有缓存的首选源
       let startIndex = 0;
       if (typeof API !== 'undefined' && API.iconCache) {
@@ -211,10 +226,69 @@ const App = {
     }
   },
   
+  // 初始化书签图标加载逻辑
+  async initBookmarkIcons() {
+    const images = document.querySelectorAll('.bookmark-icon-img');
+    
+    for (const img of images) {
+      const sources = JSON.parse(img.getAttribute('data-sources') || '[]');
+      const hostname = img.getAttribute('data-hostname');
+      
+      if (sources.length === 0) continue;
+      
+      // 优先检查本地缓存
+      if (typeof API !== 'undefined' && API.iconCache) {
+        const cachedIcon = await API.iconCache.getCachedIcon(hostname);
+        if (cachedIcon) {
+          console.log(`使用缓存图标 - 域名: ${hostname} (书签)`);
+          img.src = cachedIcon;
+          img.style.display = 'block';
+          continue; // 跳过网络加载
+        }
+      }
+      
+      // 检查是否有缓存的首选源
+      let startIndex = 0;
+      if (typeof API !== 'undefined' && API.iconCache) {
+        const preferred = await API.iconCache.getPreferredSource(hostname);
+        if (preferred && preferred.index < sources.length) {
+          startIndex = preferred.index;
+        }
+      }
+      
+      // 从首选源开始加载
+      this.loadIconWithFallback(img, sources, startIndex, hostname);
+    }
+  },
+  
+  // 将图标转换为数据URL并缓存
+  async cacheIconAsDataUrl(img, hostname) {
+    return new Promise((resolve, reject) => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 设置画布大小与图标相同
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        
+        // 绘制图标到画布
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // 转换为数据URL
+        const dataUrl = canvas.toDataURL('image/png');
+        resolve(dataUrl);
+      } catch (error) {
+        reject(new Error('无法将图标转换为数据URL'));
+      }
+    });
+  },
+  
   // 加载图标，失败时自动降级
   loadIconWithFallback(img, sources, currentIndex, hostname) {
     if (currentIndex >= sources.length) {
       // 所有源都失败，显示降级图标
+      console.warn(`所有图标源加载失败，使用降级图标 - 域名: ${hostname}`);
       img.style.display = 'none';
       if (img.nextElementSibling) {
         img.nextElementSibling.style.display = 'flex';
@@ -223,15 +297,26 @@ const App = {
     }
     
     const currentUrl = sources[currentIndex];
+    console.log(`尝试加载图标 - 域名: ${hostname}, 源索引: ${currentIndex}, URL: ${currentUrl}`);
     
     // 设置加载成功和失败的处理
     const onLoad = async () => {
       // 图标加载成功，保存这个源为首选
-      if (typeof API !== 'undefined' && API.iconCache && currentIndex > 0) {
-        // 只有当不是第一个源时才保存（第一个源是默认的）
+      if (typeof API !== 'undefined' && API.iconCache) {
         await API.iconCache.savePreferredSource(hostname, currentIndex);
-        console.log(`图标加载成功 - 域名: ${hostname}, 源索引: ${currentIndex}`);
+        
+        // 将图标缓存为数据URL
+        try {
+          const cachedIcon = await this.cacheIconAsDataUrl(img, hostname);
+          if (cachedIcon) {
+            await API.iconCache.cacheIcon(hostname, cachedIcon);
+          }
+        } catch (error) {
+          console.warn(`缓存图标失败 - 域名: ${hostname}, 错误: ${error.message}`);
+        }
       }
+      
+      console.log(`图标加载成功 - 域名: ${hostname}, 源索引: ${currentIndex}`);
       img.style.display = 'block';
     };
     
