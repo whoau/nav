@@ -1341,6 +1341,27 @@ const switchSettings = [
       });
     }
 
+    // 绑定导航栏导入导出按钮
+    const exportBtnNav = document.getElementById('exportDataBtnNav');
+    if (exportBtnNav) {
+      exportBtnNav.addEventListener('click', async () => {
+        if (exportBtnNav.classList.contains('loading')) return;
+        exportBtnNav.classList.add('loading');
+        try {
+          await this.exportUserData();
+        } finally {
+          exportBtnNav.classList.remove('loading');
+        }
+      });
+    }
+
+    const importBtnNav = document.getElementById('importDataBtnNav');
+    if (importBtnNav) {
+      importBtnNav.addEventListener('click', () => {
+        this.initImportData();
+      });
+    }
+
     this.initImportModals();
   },
 

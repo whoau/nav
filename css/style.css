@@ -131,37 +131,113 @@ body {
 
 .left-section {
   display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.logo:hover {
+  opacity: 0.8;
+  transform: translateY(-1px);
+}
+
+.logo-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.7) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: none; /* 默认隐藏文字，小屏更简洁 */
+}
+
+@media (min-width: 768px) {
+  .logo-text {
+    display: block;
+  }
+}
+
+.top-bar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-color);
+  opacity: 0.5;
+}
+
+.time-info {
+  display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 8px;
 }
 
 .clock {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 300;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
 }
 
 .date {
-  font-size: 12px;
-  opacity: 0.8;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.right-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .icon-btn {
   background: var(--bg-card);
   border: none;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 10px;
   color: var(--text-color);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   backdrop-filter: var(--blur);
   border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .icon-btn:hover {
   background: var(--bg-card-hover);
-  transform: scale(1.05);
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.icon-btn:active {
+  transform: translateY(0);
+}
+
+.icon-svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2;
+}
+
+.wallpaper-btn .icon-svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
 }
 
 /* ==================== 主内容区 ==================== */
@@ -267,6 +343,39 @@ body {
 .search-btn:hover {
   transform: scale(1.05);
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.search-btn .icon-svg {
+  width: 18px;
+  height: 18px;
+  stroke: white;
+}
+
+.search-engine-selector .chevron-icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.6;
+}
+
+.add-shortcut-btn .add-icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
+}
+
+.add-shortcut-btn:hover .add-icon {
+  color: var(--text-color);
+}
+
+.icon-btn.loading .icon-svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* 搜索引擎下拉菜单 */
@@ -2145,9 +2254,15 @@ body {
 .settings-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  padding: 8px 18px;
+  gap: 8px;
+  font-size: 13px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.settings-action-btn:hover {
+  transform: translateY(-1px);
 }
 
 .settings-action-btn.loading {
@@ -2155,6 +2270,7 @@ body {
   pointer-events: none;
 }
 
+.settings-action-btn.loading .icon-svg,
 .settings-action-btn.loading i {
   animation: spin 1s linear infinite;
 }
