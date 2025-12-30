@@ -510,11 +510,14 @@ body {
   line-height: 1;
   text-align: center;
   color: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
 }
 
 .shortcut-icon-fallback.multi {
   font-size: 12px;
   letter-spacing: -0.5px;
+  padding: 0 2px;
 }
 
 .shortcut-name {
@@ -2007,6 +2010,21 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.bookmark-icon-fallback {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
   flex-shrink: 0;
 }
 
