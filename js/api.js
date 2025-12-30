@@ -232,15 +232,75 @@ const API = {
     { name: '午夜', colors: ['#0f0c29', '#302b63'] }
   ],
 
-  getFaviconUrl(pageUrl, { size = 64, scaleFactor = 2 } = {}) {
-    try {
-      const url = new URL(pageUrl);
-      //  Favicon API，避免统一使用 Google 的 CSP 违规
-      return `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(url.hostname)}`;
-    } catch {
-      // 解析失败时使用默认图标
-      return `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(pageUrl || 'default')}`;
+  // 图标缓存管理
+  iconCache: {
+    PREFERRED_SOURCE_KEY: 'iconPreferredSources',
+    
+    // 获取域名的首选图标源
+    async getPreferredSource(hostname) {
+      const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
+      return cache[hostname] || null;
+    },
+    
+    // 保存成功的图标源
+    async savePreferredSource(hostname, sourceIndex) {
+      const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
+      cache[hostname] = {
+        index: sourceIndex,
+        lastSuccess: Date.now()
+      };
+      await Storage.set(this.PREFERRED_SOURCE_KEY, cache);
+    },
+    
+    // 清理7天前的记录
+    async cleanup() {
+      const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
+      const now = Date.now();
+      const TTL = 7 * 24 * 60 * 60 * 1000; // 7天
+      let changed = false;
+      
+      for (const [hostname, data] of Object.entries(cache)) {
+        if (now - data.lastSuccess > TTL) {
+          delete cache[hostname];
+          changed = true;
+        }
+      }
+      
+      if (changed) {
+        await Storage.set(this.PREFERRED_SOURCE_KEY, cache);
+      }
     }
+  },
+
+  // 获取多个备选图标源URL
+  getFaviconUrls(pageUrl, { size = 64 } = {}) {
+    let hostname = '';
+    try {
+      hostname = new URL(pageUrl).hostname;
+    } catch {
+      hostname = pageUrl || 'default';
+    }
+    
+    // 返回多个备选源，按优先级排序
+    return [
+      // 源1: Google Favicon API（最可靠）
+      `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(hostname)}`,
+      
+      // 源2: DuckDuckGo Favicon（无需代理，国内可访问）
+      `https://icons.duckduckgo.com/ip3/${encodeURIComponent(hostname)}.ico`,
+      
+      // 源3: Favicon Kit（备选服务）
+      `https://api.faviconkit.com/${encodeURIComponent(hostname)}/${size}`,
+      
+      // 源4: 网站自身的 favicon.ico
+      `https://${hostname}/favicon.ico`
+    ];
+  },
+  
+  // 获取单个图标URL（保持向后兼容）
+  getFaviconUrl(pageUrl, { size = 64, scaleFactor = 2 } = {}) {
+    const urls = this.getFaviconUrls(pageUrl, { size });
+    return urls[0]; // 返回首选源
   },
 
   // 获取位置

@@ -12,6 +12,9 @@ const App = {
 
     // 初始化壁纸库
     await this.initWallpaperLibrary();
+    
+    // 清理过期的图标缓存（每次启动时执行一次）
+    this.cleanupIconCache();
 
     this.initClock();
     this.initGreeting();
@@ -36,6 +39,18 @@ const App = {
     if (settings.showNotes !== false) Widgets.initNotes();
     if (settings.showGames !== false) Widgets.initGames();
     console.log('App initialized successfully');
+  },
+  
+  // 清理过期的图标缓存
+  async cleanupIconCache() {
+    try {
+      if (typeof API !== 'undefined' && API.iconCache) {
+        await API.iconCache.cleanup();
+        console.log('图标缓存清理完成');
+      }
+    } catch (error) {
+      console.warn('清理图标缓存失败:', error);
+    }
   },
 
   async loadData() {
@@ -117,19 +132,24 @@ const App = {
         domain = url;
       }
 
-      const faviconUrl = typeof API !== 'undefined' && typeof API.getFaviconUrl === 'function'
-        ? API.getFaviconUrl(url)
-        : `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`;
-
       let iconMarkup = '';
       if (isTextIcon) {
+        // 纯文本图标
         iconMarkup = `<div class="shortcut-icon-fallback${multiClass}">${iconText}</div>`;
-      } else {
-        const imgSrc = isDataIcon ? iconValue : faviconUrl;
+      } else if (isDataIcon) {
+        // 用户上传的自定义图标（已经是 data URL）
         iconMarkup = `
-          <img src="${imgSrc}" alt="${name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+          <img src="${iconValue}" alt="${name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
           <div class="shortcut-icon-fallback${multiClass}" style="display: none;">${iconText}</div>
         `;
+      } else {
+        // 使用多源备选方案加载网站图标
+        const faviconUrls = typeof API !== 'undefined' && typeof API.getFaviconUrls === 'function'
+          ? API.getFaviconUrls(url)
+          : [`https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`];
+        
+        // 生成带多源备选的 img 标签
+        iconMarkup = this.generateMultiSourceIcon(faviconUrls, name, iconText, multiClass, domain, index);
       }
 
       return `
@@ -147,6 +167,90 @@ const App = {
 
     // 初始化拖拽功能
     Widgets.initShortcutsDragDrop(grid, shortcuts, () => this.renderShortcuts());
+    
+    // 初始化多源图标加载
+    this.initMultiSourceIcons();
+  },
+  
+  // 生成多源备选图标的HTML
+  generateMultiSourceIcon(urls, name, iconText, multiClass, hostname, index) {
+    // 将所有备选源URL存储在 data 属性中
+    const urlsJson = JSON.stringify(urls);
+    return `
+      <img class="shortcut-icon-img" 
+           data-sources='${urlsJson.replace(/'/g, '&apos;')}'
+           data-current-index="0"
+           data-hostname="${hostname}"
+           data-shortcut-index="${index}"
+           alt="${name}">
+      <div class="shortcut-icon-fallback${multiClass}" style="display: none;">${iconText}</div>
+    `;
+  },
+  
+  // 初始化多源图标加载逻辑
+  async initMultiSourceIcons() {
+    const images = document.querySelectorAll('.shortcut-icon-img');
+    
+    for (const img of images) {
+      const sources = JSON.parse(img.getAttribute('data-sources') || '[]');
+      const hostname = img.getAttribute('data-hostname');
+      
+      if (sources.length === 0) continue;
+      
+      // 检查是否有缓存的首选源
+      let startIndex = 0;
+      if (typeof API !== 'undefined' && API.iconCache) {
+        const preferred = await API.iconCache.getPreferredSource(hostname);
+        if (preferred && preferred.index < sources.length) {
+          startIndex = preferred.index;
+        }
+      }
+      
+      // 从首选源开始加载
+      this.loadIconWithFallback(img, sources, startIndex, hostname);
+    }
+  },
+  
+  // 加载图标，失败时自动降级
+  loadIconWithFallback(img, sources, currentIndex, hostname) {
+    if (currentIndex >= sources.length) {
+      // 所有源都失败，显示降级图标
+      img.style.display = 'none';
+      if (img.nextElementSibling) {
+        img.nextElementSibling.style.display = 'flex';
+      }
+      return;
+    }
+    
+    const currentUrl = sources[currentIndex];
+    
+    // 设置加载成功和失败的处理
+    const onLoad = async () => {
+      // 图标加载成功，保存这个源为首选
+      if (typeof API !== 'undefined' && API.iconCache && currentIndex > 0) {
+        // 只有当不是第一个源时才保存（第一个源是默认的）
+        await API.iconCache.savePreferredSource(hostname, currentIndex);
+        console.log(`图标加载成功 - 域名: ${hostname}, 源索引: ${currentIndex}`);
+      }
+      img.style.display = 'block';
+    };
+    
+    const onError = () => {
+      console.warn(`图标加载失败 - 域名: ${hostname}, 源索引: ${currentIndex}, URL: ${currentUrl}`);
+      // 当前源失败，尝试下一个
+      this.loadIconWithFallback(img, sources, currentIndex + 1, hostname);
+    };
+    
+    // 移除旧的事件监听器（如果有）
+    img.onload = null;
+    img.onerror = null;
+    
+    // 设置新的事件监听器
+    img.onload = onLoad;
+    img.onerror = onError;
+    
+    // 开始加载
+    img.src = currentUrl;
   },
 
   // 初始化壁纸库

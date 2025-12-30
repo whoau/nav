@@ -40,6 +40,7 @@ const Storage = {
       showNotes: true,
       showGames: true
     },
+    iconPreferredSources: {},
     shortcuts: [
       { name: 'Google', url: 'https://google.com' },
       { name: 'YouTube', url: 'https://youtube.com' },
