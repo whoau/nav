@@ -115,15 +115,13 @@ const App = {
       const name = shortcut.name || '';
       const url = shortcut.url || '';
 
-      const firstChar = Array.from(name.trim())[0] || '?';
-      const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
-
+      // 使用统一的默认图标文本（空字符串）而不是首字母
       const iconValue = shortcut.icon || 'default';
       const customColor = shortcut.color || '';
 
       const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
       const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
-      const iconText = isTextIcon ? iconValue : initial;
+      const iconText = isTextIcon ? iconValue : ''; // 统一使用空字符串作为默认
       const multiClass = Array.from(iconText).length > 1 ? ' multi' : '';
 
       let domain = '';
@@ -285,26 +283,35 @@ const App = {
   },
   
   // 加载图标，失败时自动降级
-  loadIconWithFallback(img, sources, currentIndex, hostname) {
+  async loadIconWithFallback(img, sources, currentIndex, hostname) {
     if (currentIndex >= sources.length) {
-      // 所有源都失败，显示降级图标
-      console.warn(`所有图标源加载失败，使用降级图标 - 域名: ${hostname}`);
+      // 所有源都失败，显示统一的降级图标
+      console.warn(`所有图标源加载失败，使用统一降级图标 - 域名: ${hostname}`);
       img.style.display = 'none';
       if (img.nextElementSibling) {
         img.nextElementSibling.style.display = 'flex';
+        // 使用统一的默认样式，不显示首字母
+        img.nextElementSibling.textContent = '';
+        img.nextElementSibling.classList.add('default-fallback');
       }
       return;
     }
-    
+
     const currentUrl = sources[currentIndex];
     console.log(`尝试加载图标 - 域名: ${hostname}, 源索引: ${currentIndex}, URL: ${currentUrl}`);
-    
+
+    // 特殊处理 html-head:// 协议 - 需要解析 HTML 来获取 favicon
+    if (currentUrl.startsWith('html-head://')) {
+      await this.handleHtmlHeadFavicon(img, sources, currentIndex, hostname, currentUrl);
+      return;
+    }
+
     // 设置加载成功和失败的处理
     const onLoad = async () => {
       // 图标加载成功，保存这个源为首选
       if (typeof API !== 'undefined' && API.iconCache) {
         await API.iconCache.savePreferredSource(hostname, currentIndex);
-        
+
         // 将图标缓存为数据URL
         try {
           const cachedIcon = await this.cacheIconAsDataUrl(img, hostname);
@@ -315,27 +322,109 @@ const App = {
           console.warn(`缓存图标失败 - 域名: ${hostname}, 错误: ${error.message}`);
         }
       }
-      
+
       console.log(`图标加载成功 - 域名: ${hostname}, 源索引: ${currentIndex}`);
       img.style.display = 'block';
     };
-    
+
     const onError = () => {
       console.warn(`图标加载失败 - 域名: ${hostname}, 源索引: ${currentIndex}, URL: ${currentUrl}`);
       // 当前源失败，尝试下一个
       this.loadIconWithFallback(img, sources, currentIndex + 1, hostname);
     };
-    
+
     // 移除旧的事件监听器（如果有）
     img.onload = null;
     img.onerror = null;
-    
+
     // 设置新的事件监听器
     img.onload = onLoad;
     img.onerror = onError;
-    
+
     // 开始加载
     img.src = currentUrl;
+  },
+
+  // 处理 html-head:// 协议的 favicon 解析
+  async handleHtmlHeadFavicon(img, sources, currentIndex, hostname, htmlHeadUrl) {
+    try {
+      // 提取域名
+      const domain = htmlHeadUrl.replace('html-head://', '');
+      const websiteUrl = `https://${domain}`;
+
+      console.log(`尝试从 HTML head 解析 favicon - 域名: ${domain}`);
+
+      // 获取网站 HTML
+      const response = await fetch(websiteUrl, {
+        method: 'GET',
+        mode: 'cors',
+        cache: 'no-cache',
+        headers: {
+          'Accept': 'text/html'
+        },
+        signal: AbortSignal.timeout(8000) // 8秒超时
+      });
+
+      if (!response.ok) {
+        console.warn(`无法获取网站 HTML - 域名: ${domain}, 状态: ${response.status}`);
+        // 继续尝试下一个源
+        this.loadIconWithFallback(img, sources, currentIndex + 1, hostname);
+        return;
+      }
+
+      const html = await response.text();
+
+      // 解析 HTML 以获取 favicon URL
+      if (typeof API !== 'undefined' && API.parseFaviconFromHtml) {
+        const faviconUrl = await API.parseFaviconFromHtml(html, domain);
+
+        if (faviconUrl) {
+          console.log(`从 HTML head 找到 favicon - 域名: ${domain}, URL: ${faviconUrl}`);
+
+          // 保存这个源为首选（使用特殊索引表示 HTML head 解析）
+          if (typeof API !== 'undefined' && API.iconCache) {
+            await API.iconCache.savePreferredSource(hostname, currentIndex);
+          }
+
+          // 加载找到的 favicon
+          const onLoad = async () => {
+            // 将图标缓存为数据URL
+            try {
+              const cachedIcon = await this.cacheIconAsDataUrl(img, hostname);
+              if (cachedIcon) {
+                await API.iconCache.cacheIcon(hostname, cachedIcon);
+              }
+            } catch (error) {
+              console.warn(`缓存从 HTML 解析的图标失败 - 域名: ${hostname}, 错误: ${error.message}`);
+            }
+
+            console.log(`从 HTML 解析的 favicon 加载成功 - 域名: ${domain}`);
+            img.style.display = 'block';
+          };
+
+          const onError = () => {
+            console.warn(`从 HTML 解析的 favicon 加载失败 - 域名: ${domain}, URL: ${faviconUrl}`);
+            // 继续尝试下一个源
+            this.loadIconWithFallback(img, sources, currentIndex + 1, hostname);
+          };
+
+          img.onload = onLoad;
+          img.onerror = onError;
+          img.src = faviconUrl;
+
+          return;
+        }
+      }
+
+      console.warn(`在 HTML head 中未找到 favicon - 域名: ${domain}`);
+      // 继续尝试下一个源
+      this.loadIconWithFallback(img, sources, currentIndex + 1, hostname);
+
+    } catch (error) {
+      console.warn(`处理 HTML head favicon 失败 - 域名: ${domain}, 错误: ${error.message}`);
+      // 继续尝试下一个源
+      this.loadIconWithFallback(img, sources, currentIndex + 1, hostname);
+    }
   },
 
   // 初始化壁纸库
