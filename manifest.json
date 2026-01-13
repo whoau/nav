@@ -12,6 +12,7 @@
     "topSites"
   ],
   "host_permissions": [
+    "<all_urls>",
     "https://*.unsplash.com/*",
     "https://source.unsplash.com/*",
     "https://picsum.photos/*",

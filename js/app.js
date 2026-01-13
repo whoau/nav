@@ -47,6 +47,7 @@ const App = {
       if (typeof API !== 'undefined' && API.iconCache) {
         await API.iconCache.cleanup();
         await API.iconCache.cleanupIconDataCache();
+        await API.iconCache.cleanupNegativeCache();
         console.log('图标缓存清理完成');
       }
     } catch (error) {
@@ -115,42 +116,35 @@ const App = {
       const name = shortcut.name || '';
       const url = shortcut.url || '';
 
-      const firstChar = Array.from(name.trim())[0] || '?';
-      const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
-
       const iconValue = shortcut.icon || 'default';
       const customColor = shortcut.color || '';
 
       const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
       const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
-      const iconText = isTextIcon ? iconValue : initial;
-      const multiClass = Array.from(iconText).length > 1 ? ' multi' : '';
 
-      let domain = '';
+      let hostname = '';
       try {
-        domain = new URL(url).hostname;
+        hostname = new URL(url).hostname;
       } catch {
-        domain = url;
+        hostname = '';
       }
 
       let iconMarkup = '';
       if (isTextIcon) {
-        // 纯文本图标
-        iconMarkup = `<div class="shortcut-icon-fallback${multiClass}">${iconText}</div>`;
+        const multiClass = Array.from(iconValue).length > 1 ? ' multi' : '';
+        iconMarkup = `<div class="shortcut-icon-fallback${multiClass}">${iconValue}</div>`;
       } else if (isDataIcon) {
         // 用户上传的自定义图标（已经是 data URL）
         iconMarkup = `
-          <img src="${iconValue}" alt="${name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-          <div class="shortcut-icon-fallback${multiClass}" style="display: none;">${iconText}</div>
+          <div class="favicon-placeholder" style="display:none" aria-hidden="true"></div>
+          <img src="${iconValue}" alt="${name}" onerror="this.style.display='none'; this.previousElementSibling.style.display='flex';">
         `;
       } else {
-        // 使用多源备选方案加载网站图标
-        const faviconUrls = typeof API !== 'undefined' && typeof API.getFaviconUrls === 'function'
-          ? API.getFaviconUrls(url)
-          : [`https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`];
-        
-        // 生成带多源备选的 img 标签
-        iconMarkup = this.generateMultiSourceIcon(faviconUrls, name, iconText, multiClass, domain, index);
+        // 默认：按 cache-first → 网站 favicon → API → 统一占位符 的策略加载
+        iconMarkup = `
+          <div class="favicon-placeholder" aria-hidden="true"></div>
+          <img class="shortcut-icon-img" data-page-url="${url}" ${hostname ? `data-hostname="${hostname}"` : ''} alt="${name}" style="display:none;">
+        `;
       }
 
       return `
@@ -191,74 +185,18 @@ const App = {
     `;
   },
   
-  // 初始化多源图标加载逻辑
+  // 初始化图标加载逻辑（cache-first）
   async initMultiSourceIcons() {
-    const images = document.querySelectorAll('.shortcut-icon-img');
-    
-    for (const img of images) {
-      const sources = JSON.parse(img.getAttribute('data-sources') || '[]');
-      const hostname = img.getAttribute('data-hostname');
-      
-      if (sources.length === 0) continue;
-      
-      // 优先检查本地缓存
-      if (typeof API !== 'undefined' && API.iconCache) {
-        const cachedIcon = await API.iconCache.getCachedIcon(hostname);
-        if (cachedIcon) {
-          console.log(`使用缓存图标 - 域名: ${hostname}`);
-          img.src = cachedIcon;
-          img.style.display = 'block';
-          continue; // 跳过网络加载
-        }
-      }
-      
-      // 检查是否有缓存的首选源
-      let startIndex = 0;
-      if (typeof API !== 'undefined' && API.iconCache) {
-        const preferred = await API.iconCache.getPreferredSource(hostname);
-        if (preferred && preferred.index < sources.length) {
-          startIndex = preferred.index;
-        }
-      }
-      
-      // 从首选源开始加载
-      this.loadIconWithFallback(img, sources, startIndex, hostname);
-    }
+    if (typeof API === 'undefined' || !API.faviconLoader) return;
+    const images = document.querySelectorAll('.shortcut-icon-img[data-page-url]');
+    await API.faviconLoader.applyToImages(images);
   },
   
-  // 初始化书签图标加载逻辑
+  // 初始化书签图标加载逻辑（cache-first）
   async initBookmarkIcons() {
-    const images = document.querySelectorAll('.bookmark-icon-img');
-    
-    for (const img of images) {
-      const sources = JSON.parse(img.getAttribute('data-sources') || '[]');
-      const hostname = img.getAttribute('data-hostname');
-      
-      if (sources.length === 0) continue;
-      
-      // 优先检查本地缓存
-      if (typeof API !== 'undefined' && API.iconCache) {
-        const cachedIcon = await API.iconCache.getCachedIcon(hostname);
-        if (cachedIcon) {
-          console.log(`使用缓存图标 - 域名: ${hostname} (书签)`);
-          img.src = cachedIcon;
-          img.style.display = 'block';
-          continue; // 跳过网络加载
-        }
-      }
-      
-      // 检查是否有缓存的首选源
-      let startIndex = 0;
-      if (typeof API !== 'undefined' && API.iconCache) {
-        const preferred = await API.iconCache.getPreferredSource(hostname);
-        if (preferred && preferred.index < sources.length) {
-          startIndex = preferred.index;
-        }
-      }
-      
-      // 从首选源开始加载
-      this.loadIconWithFallback(img, sources, startIndex, hostname);
-    }
+    if (typeof API === 'undefined' || !API.faviconLoader) return;
+    const images = document.querySelectorAll('.bookmark-icon-img[data-page-url]');
+    await API.faviconLoader.applyToImages(images);
   },
   
   // 将图标转换为数据URL并缓存
@@ -868,11 +806,10 @@ const App = {
     const updateIconPreview = ({ name, icon, color }) => {
       if (!iconPreview || !iconFallback) return;
 
-      const initial = getInitialFromName(name);
       const iconValue = icon || 'default';
       const isDataIcon = typeof iconValue === 'string' && iconValue.startsWith('data:');
       const isTextIcon = typeof iconValue === 'string' && iconValue !== 'default' && !isDataIcon;
-      const fallbackText = isTextIcon ? iconValue : initial;
+      const fallbackText = isTextIcon ? iconValue : '?';
 
       iconFallback.textContent = fallbackText;
       iconFallback.classList.toggle('multi', Array.from(fallbackText).length > 1);

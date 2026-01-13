@@ -236,14 +236,18 @@ const API = {
   iconCache: {
     PREFERRED_SOURCE_KEY: 'iconPreferredSources',
     ICON_DATA_CACHE_KEY: 'iconDataCache',
-    
-    // 获取域名的首选图标源
+    NEGATIVE_CACHE_KEY: 'iconNegativeCache',
+
+    ICON_DATA_TTL: 30 * 24 * 60 * 60 * 1000, // 30天
+    NEGATIVE_TTL: 24 * 60 * 60 * 1000, // 24小时
+
+    // 获取域名的首选图标源（历史兼容，当前已不再依赖多源索引）
     async getPreferredSource(hostname) {
       const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
       return cache[hostname] || null;
     },
-    
-    // 保存成功的图标源
+
+    // 保存成功的图标源（历史兼容）
     async savePreferredSource(hostname, sourceIndex) {
       const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
       cache[hostname] = {
@@ -252,92 +256,455 @@ const API = {
       };
       await Storage.set(this.PREFERRED_SOURCE_KEY, cache);
     },
-    
-    // 获取缓存的图标数据URL
+
+    // 获取缓存的图标数据URL（兼容旧 string 结构）
     async getCachedIcon(hostname) {
       const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
-      return cache[hostname] || null;
+      const entry = cache[hostname];
+
+      if (!entry) return null;
+
+      if (typeof entry === 'string') {
+        return entry.startsWith('data:image/') ? entry : null;
+      }
+
+      if (entry && typeof entry === 'object') {
+        const dataUrl = entry.dataUrl;
+        const updatedAt = entry.updatedAt || 0;
+        if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return null;
+        if (updatedAt && Date.now() - updatedAt > this.ICON_DATA_TTL) return null;
+        return dataUrl;
+      }
+
+      return null;
     },
-    
+
     // 缓存图标数据URL
-    async cacheIcon(hostname, dataUrl) {
+    async cacheIcon(hostname, dataUrl, meta = {}) {
       const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
-      cache[hostname] = dataUrl;
+      cache[hostname] = {
+        dataUrl,
+        updatedAt: Date.now(),
+        source: meta.source || ''
+      };
       await Storage.set(this.ICON_DATA_CACHE_KEY, cache);
       console.log(`图标已缓存 - 域名: ${hostname}`);
     },
-    
-    // 清理7天前的记录
+
+    async markFailed(hostname) {
+      const cache = await Storage.get(this.NEGATIVE_CACHE_KEY) || {};
+      cache[hostname] = {
+        lastFailure: Date.now()
+      };
+      await Storage.set(this.NEGATIVE_CACHE_KEY, cache);
+    },
+
+    async clearFailed(hostname) {
+      const cache = await Storage.get(this.NEGATIVE_CACHE_KEY) || {};
+      if (cache[hostname]) {
+        delete cache[hostname];
+        await Storage.set(this.NEGATIVE_CACHE_KEY, cache);
+      }
+    },
+
+    async isRecentlyFailed(hostname) {
+      const cache = await Storage.get(this.NEGATIVE_CACHE_KEY) || {};
+      const entry = cache[hostname];
+      if (!entry?.lastFailure) return false;
+      return Date.now() - entry.lastFailure < this.NEGATIVE_TTL;
+    },
+
+    // 清理7天前的首选源记录（历史兼容）
     async cleanup() {
       const cache = await Storage.get(this.PREFERRED_SOURCE_KEY) || {};
       const now = Date.now();
       const TTL = 7 * 24 * 60 * 60 * 1000; // 7天
       let changed = false;
-      
+
       for (const [hostname, data] of Object.entries(cache)) {
         if (now - data.lastSuccess > TTL) {
           delete cache[hostname];
           changed = true;
         }
       }
-      
+
       if (changed) {
         await Storage.set(this.PREFERRED_SOURCE_KEY, cache);
       }
     },
-    
-    // 清理过期的图标数据缓存
+
+    // 清理过期/无效的图标数据缓存
     async cleanupIconDataCache() {
       const cache = await Storage.get(this.ICON_DATA_CACHE_KEY) || {};
       const now = Date.now();
-      const TTL = 30 * 24 * 60 * 60 * 1000; // 30天
       let changed = false;
-      
-      for (const [hostname, dataUrl] of Object.entries(cache)) {
-        // 简单检查：如果数据URL看起来无效，清理它
-        if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+
+      for (const [hostname, entry] of Object.entries(cache)) {
+        if (typeof entry === 'string') {
+          if (!entry.startsWith('data:image/')) {
+            delete cache[hostname];
+            changed = true;
+          }
+          continue;
+        }
+
+        if (!entry || typeof entry !== 'object') {
+          delete cache[hostname];
+          changed = true;
+          continue;
+        }
+
+        const dataUrl = entry.dataUrl;
+        const updatedAt = entry.updatedAt || 0;
+        if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+          delete cache[hostname];
+          changed = true;
+          continue;
+        }
+
+        if (updatedAt && now - updatedAt > this.ICON_DATA_TTL) {
           delete cache[hostname];
           changed = true;
         }
       }
-      
+
       if (changed) {
         await Storage.set(this.ICON_DATA_CACHE_KEY, cache);
         console.log('图标数据缓存清理完成');
       }
+    },
+
+    async cleanupNegativeCache() {
+      const cache = await Storage.get(this.NEGATIVE_CACHE_KEY) || {};
+      const now = Date.now();
+      let changed = false;
+
+      for (const [hostname, entry] of Object.entries(cache)) {
+        if (!entry?.lastFailure || now - entry.lastFailure > this.NEGATIVE_TTL) {
+          delete cache[hostname];
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        await Storage.set(this.NEGATIVE_CACHE_KEY, cache);
+      }
     }
   },
 
-  // 获取多个备选图标源URL
-  getFaviconUrls(pageUrl, { size = 64 } = {}) {
-    let hostname = '';
-    try {
-      hostname = new URL(pageUrl).hostname;
-    } catch {
-      hostname = pageUrl || 'default';
+  // Favicon 解析与加载（cache-first）
+  faviconLoader: {
+    ICON_SIZE: 64,
+    _inFlightByHostname: new Map(),
+
+    _ensureUrl(pageUrl) {
+      if (!pageUrl) return null;
+      try {
+        return new URL(pageUrl);
+      } catch {
+        try {
+          return new URL(`https://${pageUrl}`);
+        } catch {
+          return null;
+        }
+      }
+    },
+
+    _getApiFallbackUrls(hostname) {
+      const safeHost = encodeURIComponent(hostname);
+      return [
+        `https://favicon.im/${safeHost}`,
+        `https://icon.horse/icon/${safeHost}`
+      ];
+    },
+
+    async _fetchAsDataUrl(url) {
+      try {
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(6000),
+          credentials: 'omit',
+          cache: 'no-store'
+        });
+        if (!res.ok) return null;
+
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        const looksLikeIcon = url.toLowerCase().includes('favicon') || url.toLowerCase().endsWith('.ico');
+        const isImageResponse = contentType.startsWith('image/') || contentType.includes('icon') || (looksLikeIcon && contentType === 'application/octet-stream');
+        if (!isImageResponse) return null;
+
+        const blob = await res.blob();
+        if (!blob || blob.size === 0) return null;
+        if (blob.size > 1024 * 1024) return null;
+
+        // SVG 直接转 data URL；其他尽量缩放为 64x64 PNG 以减小缓存体积
+        if (blob.type === 'image/svg+xml') {
+          return await this._blobToDataUrl(blob);
+        }
+
+        const resized = await this._rasterBlobToPngDataUrl(blob, this.ICON_SIZE);
+        return resized || await this._blobToDataUrl(blob);
+      } catch {
+        return null;
+      }
+    },
+
+    _blobToDataUrl(blob) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    },
+
+    async _rasterBlobToPngDataUrl(blob, size) {
+      try {
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+
+        ctx.clearRect(0, 0, size, size);
+
+        const scale = Math.min(size / bitmap.width, size / bitmap.height);
+        const drawW = Math.max(1, Math.round(bitmap.width * scale));
+        const drawH = Math.max(1, Math.round(bitmap.height * scale));
+        const dx = Math.floor((size - drawW) / 2);
+        const dy = Math.floor((size - drawH) / 2);
+
+        ctx.drawImage(bitmap, dx, dy, drawW, drawH);
+        bitmap.close?.();
+
+        return canvas.toDataURL('image/png');
+      } catch {
+        return null;
+      }
+    },
+
+    async _tryHeadIcons(urlObj) {
+      const candidates = [];
+
+      const tryFetchHtml = async (target) => {
+        try {
+          const res = await fetch(target, {
+            signal: AbortSignal.timeout(6000),
+            credentials: 'omit',
+            cache: 'no-store',
+            headers: {
+              'accept': 'text/html,application/xhtml+xml'
+            }
+          });
+          if (!res.ok) return null;
+          const contentType = (res.headers.get('content-type') || '').toLowerCase();
+          if (!contentType.includes('text/html')) return null;
+          return await res.text();
+        } catch {
+          return null;
+        }
+      };
+
+      const html = await tryFetchHtml(urlObj.origin + '/');
+      if (!html) return null;
+
+      try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const baseHref = doc.querySelector('base[href]')?.getAttribute('href');
+        const baseUrl = baseHref ? new URL(baseHref, urlObj.origin).toString() : urlObj.origin + '/';
+
+        const links = Array.from(doc.querySelectorAll('link[rel][href]'))
+          .map((el) => ({
+            rel: (el.getAttribute('rel') || '').toLowerCase(),
+            href: el.getAttribute('href') || '',
+            sizes: el.getAttribute('sizes') || ''
+          }))
+          .filter((item) => item.href && !item.href.startsWith('data:'))
+          .filter((item) => item.rel.includes('icon') || item.rel.includes('apple-touch-icon'))
+          .slice(0, 12);
+
+        const score = (item) => {
+          let s = 0;
+          if (item.rel.includes('icon')) s += 10;
+          if (item.rel.includes('shortcut')) s += 2;
+          if (item.rel.includes('apple-touch-icon')) s += 1;
+
+          const match = item.sizes.match(/(\d+)x(\d+)/);
+          if (match) {
+            const w = parseInt(match[1], 10);
+            const h = parseInt(match[2], 10);
+            if (!Number.isNaN(w) && !Number.isNaN(h)) s += Math.min(20, Math.floor(Math.max(w, h) / 16));
+          }
+          return -s;
+        };
+
+        links.sort((a, b) => score(a) - score(b));
+
+        for (const item of links) {
+          try {
+            const abs = new URL(item.href, baseUrl).toString();
+            if (!candidates.includes(abs)) candidates.push(abs);
+          } catch {
+            continue;
+          }
+        }
+      } catch {
+        return null;
+      }
+
+      for (const iconUrl of candidates.slice(0, 5)) {
+        const dataUrl = await this._fetchAsDataUrl(iconUrl);
+        if (dataUrl) return dataUrl;
+      }
+
+      return null;
+    },
+
+    async _resolveInternal(urlObj) {
+      const hostname = urlObj.hostname;
+
+      const cached = await API.iconCache.getCachedIcon(hostname);
+      if (cached) return cached;
+
+      if (await API.iconCache.isRecentlyFailed(hostname)) {
+        return null;
+      }
+
+      // 1) 网站自身 favicon.ico（优先）
+      const rootIconUrl = new URL('/favicon.ico', urlObj.origin).toString();
+      const rootData = await this._fetchAsDataUrl(rootIconUrl);
+      if (rootData) {
+        await API.iconCache.cacheIcon(hostname, rootData, { source: 'website-root' });
+        await API.iconCache.clearFailed(hostname);
+        return rootData;
+      }
+
+      // 2) 解析 HTML head 获取 favicon link
+      const headData = await this._tryHeadIcons(urlObj);
+      if (headData) {
+        await API.iconCache.cacheIcon(hostname, headData, { source: 'website-head' });
+        await API.iconCache.clearFailed(hostname);
+        return headData;
+      }
+
+      // 3) 不屏蔽的 Favicon API
+      const apiUrls = this._getApiFallbackUrls(hostname);
+      for (const apiUrl of apiUrls) {
+        const apiData = await this._fetchAsDataUrl(apiUrl);
+        if (apiData) {
+          await API.iconCache.cacheIcon(hostname, apiData, { source: 'api' });
+          await API.iconCache.clearFailed(hostname);
+          return apiData;
+        }
+      }
+
+      // 4) 失败：写入负缓存，避免同页/刷新时随机变化
+      await API.iconCache.markFailed(hostname);
+      return null;
+    },
+
+    async resolve(pageUrl) {
+      const urlObj = this._ensureUrl(pageUrl);
+      if (!urlObj) return null;
+
+      const hostname = urlObj.hostname;
+      if (this._inFlightByHostname.has(hostname)) {
+        return this._inFlightByHostname.get(hostname);
+      }
+
+      const promise = this._resolveInternal(urlObj)
+        .catch(() => null)
+        .finally(() => {
+          this._inFlightByHostname.delete(hostname);
+        });
+
+      this._inFlightByHostname.set(hostname, promise);
+      return promise;
+    },
+
+    async applyToImageElement(img) {
+      if (!img || img.dataset.faviconBound === 'true') return;
+
+      const pageUrl = img.dataset.pageUrl || img.getAttribute('data-page-url') || '';
+      const urlObj = this._ensureUrl(pageUrl);
+      const hostname = urlObj?.hostname || img.dataset.hostname || img.getAttribute('data-hostname');
+
+      img.dataset.faviconBound = 'true';
+      img.decoding = 'async';
+      img.loading = 'lazy';
+
+      const container = img.parentElement;
+      const placeholder = container?.querySelector('.favicon-placeholder');
+
+      const showPlaceholder = () => {
+        if (placeholder) placeholder.style.display = 'flex';
+        img.style.display = 'none';
+      };
+
+      const showIcon = () => {
+        if (placeholder) placeholder.style.display = 'none';
+        img.style.display = 'block';
+      };
+
+      img.onerror = () => {
+        showPlaceholder();
+      };
+
+      showPlaceholder();
+
+      if (hostname) {
+        const cached = await API.iconCache.getCachedIcon(hostname);
+        if (cached) {
+          img.src = cached;
+          showIcon();
+          return;
+        }
+
+        if (await API.iconCache.isRecentlyFailed(hostname)) {
+          return;
+        }
+      }
+
+      const dataUrl = await this.resolve(pageUrl);
+      if (dataUrl) {
+        img.src = dataUrl;
+        showIcon();
+      }
+    },
+
+    async applyToImages(images) {
+      if (!images) return;
+      const list = Array.isArray(images) ? images : Array.from(images);
+      await Promise.allSettled(list.map(img => this.applyToImageElement(img)));
     }
-    
-    // 返回多个备选源，按优先级排序
-    // 优先使用国内可访问的服务，避免被墙的问题
+  },
+
+  // 获取多个备选图标源URL（向后兼容，仅用于生成URL列表）
+  getFaviconUrls(pageUrl, { size = 64 } = {}) {
+    let urlObj = null;
+    try {
+      urlObj = new URL(pageUrl);
+    } catch {
+      try {
+        urlObj = new URL(`https://${pageUrl}`);
+      } catch {
+        return [];
+      }
+    }
+
+    const hostname = urlObj.hostname;
     return [
-      // 源1: 网站自身的 favicon.ico（最直接，无需第三方服务）
-      `https://${hostname}/favicon.ico`,
-      
-      // 源2: DuckDuckGo Favicon（无需代理，国内可访问）
-      `https://icons.duckduckgo.com/ip3/${encodeURIComponent(hostname)}.ico`,
-      
-      // 源3: Google Favicon API（可能被墙，但保留作为备选）
-      `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(hostname)}`,
-      
-      // 源4: Favicon Kit（备选服务，可能被墙）
-      `https://api.faviconkit.com/${encodeURIComponent(hostname)}/${size}`
+      `${urlObj.origin}/favicon.ico`,
+      `https://favicon.im/${encodeURIComponent(hostname)}`,
+      `https://icon.horse/icon/${encodeURIComponent(hostname)}`
     ];
   },
-  
+
   // 获取单个图标URL（保持向后兼容）
   getFaviconUrl(pageUrl, { size = 64, scaleFactor = 2 } = {}) {
     const urls = this.getFaviconUrls(pageUrl, { size });
-    return urls[0]; // 返回首选源
+    return urls[0];
   },
 
   // 获取位置

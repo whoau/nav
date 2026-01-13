@@ -299,32 +299,12 @@ const Widgets = {
       } else {
         bookmarksList.innerHTML = bookmarks.map((b, index) => {
           let domain = '';
-          try { domain = new URL(b.url).hostname; } catch (e) { domain = 'unknown'; }
-
-          // Use multi-source favicon approach
-          const faviconUrls = typeof API !== 'undefined' && typeof API.getFaviconUrls === 'function'
-            ? API.getFaviconUrls(b.url)
-            : [
-                `https://${domain}/favicon.ico`,
-                `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico`,
-                `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
-                `https://api.faviconkit.com/${encodeURIComponent(domain)}/64`
-              ];
-
-          // Generate multi-source img with fallback
-          const sourcesJson = JSON.stringify(faviconUrls);
-          const firstChar = Array.from(b.name.trim())[0] || '🔖';
-          const initial = /^[a-z]$/i.test(firstChar) ? firstChar.toUpperCase() : firstChar;
+          try { domain = new URL(b.url).hostname; } catch { domain = ''; }
 
           return `
             <li class="bookmark-item" data-index="${index}">
-              <img class="bookmark-icon-img"
-                   data-sources='${sourcesJson.replace(/'/g, '&apos;')}'
-                   data-current-index="0"
-                   data-hostname="${domain}"
-                   alt="${this.escapeHtml(b.name)}"
-                   onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-              <div class="bookmark-icon-fallback" style="display: none;">${initial}</div>
+              <div class="favicon-placeholder" aria-hidden="true"></div>
+              <img class="bookmark-icon-img" data-page-url="${b.url}" ${domain ? `data-hostname="${domain}"` : ''} alt="${this.escapeHtml(b.name)}" style="display:none;">
               <span class="bookmark-name">${this.escapeHtml(b.name)}</span>
               <button class="bookmark-delete" data-index="${index}">
                 <i class="fas fa-times"></i>
@@ -332,6 +312,10 @@ const Widgets = {
             </li>
           `;
         }).join('');
+
+        if (typeof API !== 'undefined' && API.faviconLoader) {
+          API.faviconLoader.applyToImages(bookmarksList.querySelectorAll('.bookmark-icon-img[data-page-url]'));
+        }
       }
     };
 
