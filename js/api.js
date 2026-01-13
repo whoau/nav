@@ -316,22 +316,91 @@ const API = {
     } catch {
       hostname = pageUrl || 'default';
     }
-    
+
     // 返回多个备选源，按优先级排序
-    // 优先使用国内可访问的服务，避免被墙的问题
+    // 优先级：1. 网站自身 favicon 2. HTML head 中的 favicon 3. 无需代理的 API
     return [
       // 源1: 网站自身的 favicon.ico（最直接，无需第三方服务）
       `https://${hostname}/favicon.ico`,
-      
-      // 源2: DuckDuckGo Favicon（无需代理，国内可访问）
-      `https://icons.duckduckgo.com/ip3/${encodeURIComponent(hostname)}.ico`,
-      
-      // 源3: Google Favicon API（可能被墙，但保留作为备选）
-      `https://www.google.com/s2/favicons?sz=${size}&domain=${encodeURIComponent(hostname)}`,
-      
-      // 源4: Favicon Kit（备选服务，可能被墙）
-      `https://api.faviconkit.com/${encodeURIComponent(hostname)}/${size}`
+
+      // 源2: 尝试从网站 HTML head 中获取 favicon（需要通过特殊处理）
+      `html-head://${hostname}`,
+
+      // 源3: DuckDuckGo Favicon（无需代理，国内可访问）
+      `https://icons.duckduckgo.com/ip3/${encodeURIComponent(hostname)}.ico`
+
+      // 注意：已移除 Google Favicon API 和 Favicon Kit 以避免被墙问题
     ];
+  },
+
+  // 从网站 HTML 中解析 favicon URL
+  async parseFaviconFromHtml(html, hostname) {
+    try {
+      // 创建临时 DOM 元素来解析 HTML
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      
+      // 查找所有 link 标签中 rel="icon" 或 rel="shortcut icon" 的元素
+      const links = doc.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
+      
+      // 也查找 link 标签中 rel="apple-touch-icon" 的元素
+      const appleLinks = doc.querySelectorAll('link[rel="apple-touch-icon"]');
+      
+      // 合并所有可能的 favicon 链接
+      const allLinks = Array.from(links).concat(Array.from(appleLinks));
+      
+      // 按优先级排序：首先是绝对 URL，然后是相对 URL
+      const sortedLinks = allLinks.sort((a, b) => {
+        const aHref = a.getAttribute('href') || '';
+        const bHref = b.getAttribute('href') || '';
+        
+        // 绝对 URL 优先
+        const aIsAbsolute = aHref.startsWith('http://') || aHref.startsWith('https://');
+        const bIsAbsolute = bHref.startsWith('http://') || bHref.startsWith('https://');
+        
+        if (aIsAbsolute && !bIsAbsolute) return -1;
+        if (!aIsAbsolute && bIsAbsolute) return 1;
+        
+        // 然后按 sizes 属性优先（如果有指定大小，优先匹配我们需要的大小）
+        const aSizes = a.getAttribute('sizes') || '';
+        const bSizes = b.getAttribute('sizes') || '';
+        
+        // 优先包含 "64x64" 或 "any" 的图标
+        const aPreferred = aSizes.includes('64x64') || aSizes.includes('any');
+        const bPreferred = bSizes.includes('64x64') || bSizes.includes('any');
+        
+        if (aPreferred && !bPreferred) return -1;
+        if (!aPreferred && bPreferred) return 1;
+        
+        return 0;
+      });
+      
+      // 尝试每个链接，返回第一个有效的绝对 URL
+      for (const link of sortedLinks) {
+        const href = link.getAttribute('href');
+        if (!href) continue;
+        
+        // 如果是绝对 URL，直接返回
+        if (href.startsWith('http://') || href.startsWith('https://')) {
+          return href;
+        }
+        
+        // 如果是相对 URL，转换为绝对 URL
+        try {
+          const absoluteUrl = new URL(href, `https://${hostname}`).href;
+          return absoluteUrl;
+        } catch {
+          // 如果 URL 解析失败，跳过
+          continue;
+        }
+      }
+      
+      // 如果没有找到 favicon 链接，返回 null
+      return null;
+    } catch (error) {
+      console.warn(`解析 HTML 中的 favicon 失败: ${error.message}`);
+      return null;
+    }
   },
   
   // 获取单个图标URL（保持向后兼容）
