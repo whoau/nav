@@ -413,9 +413,7 @@ const API = {
     _getApiFallbackUrls(hostname) {
       const safeHost = encodeURIComponent(hostname);
       return [
-        `https://www.google.com/s2/favicons?domain=${safeHost}&sz=64`,
-        `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent('https://' + safeHost)}&size=64`,
-        `https://favicons.githubusercontent.com/${safeHost}`,
+        `https://www.google.com/s2/favicons?domain=${hostname}`,
         `https://favicon.im/${safeHost}`,
         `https://icon.horse/icon/${safeHost}`
       ];
@@ -431,17 +429,13 @@ const API = {
         if (!res.ok) return null;
 
         const contentType = (res.headers.get('content-type') || '').toLowerCase();
-        const looksLikeIcon = url.toLowerCase().includes('favicon') ||
-                             url.toLowerCase().endsWith('.ico') ||
-                             url.toLowerCase().includes('icon');
-        // 更宽松的 content-type 检查，支持各种变体
-        const isImageResponse = contentType.startsWith('image/') ||
-                              contentType.includes('icon') ||
-                              contentType.includes('octet-stream') ||
-                              contentType === 'application/x-icon' ||
-                              contentType === 'image/vnd.microsoft.icon' ||
-                              contentType === 'image/x-icon' ||
-                              (looksLikeIcon && (contentType === 'application/octet-stream' || !contentType));
+        const looksLikeIcon = url.toLowerCase().includes('favicon') || url.toLowerCase().endsWith('.ico');
+        // 改为：只要是图片相关就接受
+        const isImageResponse = contentType.startsWith('image/')
+          || contentType.includes('icon')
+          || looksLikeIcon
+          || contentType === 'application/octet-stream'
+          || contentType === '';  // 某些服务器不返回 content-type
         if (!isImageResponse) return null;
 
         const blob = await res.blob();
@@ -569,19 +563,8 @@ const API = {
         return null;
       }
 
-      // 并行尝试前3个图标，加快速度
-      const results = await Promise.allSettled(
-        candidates.slice(0, 3).map(url => this._fetchAsDataUrl(url))
-      );
-
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
-          return result.value;
-        }
-      }
-
-      // 如果并行失败，逐个尝试剩余的
-      for (const iconUrl of candidates.slice(3)) {
+      // 逐个尝试图标，按顺序执行
+      for (const iconUrl of candidates) {
         const dataUrl = await this._fetchAsDataUrl(iconUrl);
         if (dataUrl) return dataUrl;
       }
@@ -592,184 +575,42 @@ const API = {
     async _resolveInternal(urlObj) {
       const hostname = urlObj.hostname;
 
+      // 1. 检查缓存
       const cached = await API.iconCache.getCachedIcon(hostname);
       if (cached) return cached;
 
+      // 2. 如果最近失败过，跳过（6小时后再试）
       if (await API.iconCache.isRecentlyFailed(hostname)) {
         return null;
       }
 
-      // Step 1: 尝试网站本身（总超时 5s）
-      // Step 1a: GET /favicon.ico（超时 2s）
-      const rootIconUrl = new URL('/favicon.ico', urlObj.origin).toString();
-      const rootResult = await this._fetchAsDataUrlWithTimeout(rootIconUrl, 2000);
-
-      if (rootResult) {
-        await API.iconCache.cacheIcon(hostname, rootResult, { source: 'root' });
-        await API.iconCache.clearFailed(hostname);
-        return rootResult;
+      // 3. 从网站获取 (/favicon.ico)
+      const faviconUrl = new URL('/favicon.ico', urlObj.origin).toString();
+      const faviconData = await this._fetchAsDataUrl(faviconUrl);
+      if (faviconData) {
+        await API.iconCache.cacheIcon(hostname, faviconData);
+        return faviconData;
       }
 
-      // Step 1b: 解析 HTML <link rel="icon">（超时 3s）
-      const headResult = await this._tryHeadIconsWithTimeout(urlObj, 3000);
-
-      if (headResult) {
-        await API.iconCache.cacheIcon(hostname, headResult, { source: 'head' });
-        await API.iconCache.clearFailed(hostname);
-        return headResult;
+      // 4. 从网站 HTML 获取 icon
+      const headIconData = await this._tryHeadIcons(urlObj);
+      if (headIconData) {
+        await API.iconCache.cacheIcon(hostname, headIconData);
+        return headIconData;
       }
 
-      // Step 2: 第三方 API（超时 3s，并行多个）
-      const apiUrls = this._getApiFallbackUrls(hostname);
-      const apiResult = await this.tryAnyApi(apiUrls, 3000);
-
-      if (apiResult) {
-        await API.iconCache.cacheIcon(hostname, apiResult, { source: 'api' });
-        await API.iconCache.clearFailed(hostname);
-        return apiResult;
+      // 5. 从第三方 API 获取（按顺序尝试）
+      const apiFallbackUrls = this._getApiFallbackUrls(hostname);
+      for (const apiUrl of apiFallbackUrls) {
+        const apiData = await this._fetchAsDataUrl(apiUrl);
+        if (apiData) {
+          await API.iconCache.cacheIcon(hostname, apiData);
+          return apiData;
+        }
       }
 
-      // 所有来源都失败：写入负缓存，避免同页/刷新时随机变化
+      // 6. 全部失败
       await API.iconCache.markFailed(hostname);
-      return null;
-    },
-
-    // 带超时的 favicon.ico 获取
-    async _fetchAsDataUrlWithTimeout(url, timeoutMs) {
-      try {
-        const res = await fetch(url, {
-          signal: AbortSignal.timeout(timeoutMs),
-          credentials: 'omit',
-          cache: 'no-store'
-        });
-        if (!res.ok) return null;
-
-        const contentType = (res.headers.get('content-type') || '').toLowerCase();
-        const looksLikeIcon = url.toLowerCase().includes('favicon') ||
-                             url.toLowerCase().endsWith('.ico') ||
-                             url.toLowerCase().includes('icon');
-        const isImageResponse = contentType.startsWith('image/') ||
-                               contentType.includes('icon') ||
-                               contentType.includes('octet-stream') ||
-                               contentType === 'application/x-icon' ||
-                               contentType === 'image/vnd.microsoft.icon' ||
-                               contentType === 'image/x-icon' ||
-                               (looksLikeIcon && (contentType === 'application/octet-stream' || !contentType));
-        if (!isImageResponse) return null;
-
-        const blob = await res.blob();
-        if (!blob || blob.size === 0) return null;
-        if (blob.size > 1024 * 1024) return null;
-
-        const isImage = blob.type.startsWith('image/') || blob.type === 'application/octet-stream' || !blob.type;
-        if (!isImage) return null;
-
-        if (blob.type === 'image/svg+xml') {
-          return await this._blobToDataUrl(blob);
-        }
-
-        const resized = await this._rasterBlobToPngDataUrl(blob, this.ICON_SIZE);
-        return resized || await this._blobToDataUrl(blob);
-      } catch {
-        return null;
-      }
-    },
-
-    // 带超时的 HTML 图标解析
-    async _tryHeadIconsWithTimeout(urlObj, timeoutMs) {
-      const tryFetchHtml = async (target) => {
-        try {
-          const res = await fetch(target, {
-            signal: AbortSignal.timeout(timeoutMs),
-            credentials: 'omit',
-            cache: 'no-store',
-            headers: {
-              'accept': 'text/html,application/xhtml+xml'
-            }
-          });
-          if (!res.ok) return null;
-          const contentType = (res.headers.get('content-type') || '').toLowerCase();
-          if (!contentType.includes('text/html')) return null;
-          return await res.text();
-        } catch {
-          return null;
-        }
-      };
-
-      const html = await tryFetchHtml(urlObj.origin + '/');
-      if (!html) return null;
-
-      try {
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const baseHref = doc.querySelector('base[href]')?.getAttribute('href');
-        const baseUrl = baseHref ? new URL(baseHref, urlObj.origin).toString() : urlObj.origin + '/';
-
-        const links = Array.from(doc.querySelectorAll('link[rel][href]'))
-          .map((el) => ({
-            rel: (el.getAttribute('rel') || '').toLowerCase(),
-            href: el.getAttribute('href') || '',
-            sizes: el.getAttribute('sizes') || ''
-          }))
-          .filter((item) => item.href && !item.href.startsWith('data:'))
-          .filter((item) => item.rel.includes('icon') || item.rel.includes('apple-touch-icon'))
-          .slice(0, 12);
-
-        const score = (item) => {
-          let s = 0;
-          if (item.rel.includes('icon')) s += 10;
-          if (item.rel.includes('shortcut')) s += 2;
-          if (item.rel.includes('apple-touch-icon')) s += 1;
-
-          const match = item.sizes.match(/(\d+)x(\d+)/);
-          if (match) {
-            const w = parseInt(match[1], 10);
-            const h = parseInt(match[2], 10);
-            if (!Number.isNaN(w) && !Number.isNaN(h)) s += Math.min(20, Math.floor(Math.max(w, h) / 16));
-          }
-          return -s;
-        };
-
-        links.sort((a, b) => score(a) - score(b));
-
-        const candidates = [];
-        for (const item of links) {
-          try {
-            const abs = new URL(item.href, baseUrl).toString();
-            if (!candidates.includes(abs)) candidates.push(abs);
-          } catch {
-            continue;
-          }
-        }
-
-        // 并行尝试图标，最快的返回
-        const results = await Promise.allSettled(
-          candidates.slice(0, 5).map(url => this._fetchAsDataUrl(url))
-        );
-
-        for (const result of results) {
-          if (result.status === 'fulfilled' && result.value) {
-            return result.value;
-          }
-        }
-
-        return null;
-      } catch {
-        return null;
-      }
-    },
-
-    // 尝试任意一个 API 返回成功即可
-    async tryAnyApi(apiUrls, timeoutMs = 3000) {
-      // 并行请求所有 API，取第一个成功的
-      const results = await Promise.allSettled(
-        apiUrls.map(url => this._fetchAsDataUrlWithTimeout(url, timeoutMs))
-      );
-
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
-          return result.value;
-        }
-      }
       return null;
     },
 

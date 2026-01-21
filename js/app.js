@@ -986,29 +986,28 @@ const App = {
         }
 
         try {
-          // 更新快捷方式数组（只修改当前索引）
-          shortcuts[editingIndex] = updatedShortcut;
+          // 更新快捷方式数组（只修改当前索引，使用展开运算符保留其他属性）
+          shortcuts[editingIndex] = { ...updatedShortcut };
           this.data.shortcuts = shortcuts;
-          
+
           console.log('保存快捷方式编辑:', {
             index: editingIndex,
-            shortcut: updatedShortcut,
-            fullArray: shortcuts
+            shortcut: updatedShortcut
           });
-          
+
           // 保存到存储
           await Storage.set('shortcuts', shortcuts);
-          
+
           // 清理内存缓存，确保下次读取时获取最新数据
           Storage._memoryCache.delete('shortcuts');
           Storage._pendingGets.delete('shortcuts');
-          
+
           console.log('快捷方式已保存，重新渲染UI');
-          
+
           // 重新渲染UI
           this.renderShortcuts();
           closeEditModal();
-          
+
         } catch (error) {
           console.error('保存快捷方式失败:', error);
           alert('保存失败，请重试');
