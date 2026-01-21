@@ -10,34 +10,37 @@ const App = {
     console.log('App initializing...');
     await this.loadData();
 
-    // 初始化壁纸库
-    await this.initWallpaperLibrary();
-    
-    // 清理过期的图标缓存（每次启动时执行一次）
-    this.cleanupIconCache();
-
+    // 立即渲染基础 UI（不等待任何 API）
     this.initClock();
     this.initGreeting();
     this.initShortcuts();
     this.initSettings();
+    Search.init();
+
+    // 后台异步初始化（不阻塞页面）
     this.initBackground();
     this.initWallpaperControls();
     this.startPeriodicWallpaperUpdate();
-    // Initialize wallpaper timers based on current settings
     this.updateWallpaperTimers(this.data.settings.autoChangeWallpaper || 'never');
-    Search.init();
 
-    // 初始化小组件
+    // 清理过期的图标缓存（每次启动时执行一次）
+    this.cleanupIconCache();
+
+    // 异步初始化壁纸库（不等待）
+    this.initWallpaperLibrary().catch(err => console.warn('壁纸库初始化失败:', err));
+
+    // 异步加载图标（增量加载，先显示占位符）
+    this.loadIconsIncrementally();
+
+    // 异步初始化小组件（不阻塞页面）
     const settings = this.data.settings;
     if (settings.showWeather !== false) Widgets.initWeather();
     if (settings.showProverb !== false) Widgets.initProverb();
-    //if (settings.showMovie !== false) Widgets.initMovie();
-    // if (settings.showBook !== false) Widgets.initBook();
-     //if (settings.showMusic !== false) Widgets.initMusic();
     if (settings.showTodo !== false) Widgets.initTodo();
     if (settings.showBookmarks !== false) Widgets.initBookmarks();
     if (settings.showNotes !== false) Widgets.initNotes();
     if (settings.showGames !== false) Widgets.initGames();
+
     console.log('App initialized successfully');
   },
   
@@ -162,41 +165,44 @@ const App = {
 
     // 初始化拖拽功能
     Widgets.initShortcutsDragDrop(grid, shortcuts, () => this.renderShortcuts());
-    
-    // 初始化多源图标加载
-    this.initMultiSourceIcons();
+  },
 
-    // 初始化书签图标加载
-    this.initBookmarkIcons();
-  },
-  
-  // 生成多源备选图标的HTML
-  generateMultiSourceIcon(urls, name, iconText, multiClass, hostname, index) {
-    // 将所有备选源URL存储在 data 属性中
-    const urlsJson = JSON.stringify(urls);
-    return `
-      <img class="shortcut-icon-img" 
-           data-sources='${urlsJson.replace(/'/g, '&apos;')}'
-           data-current-index="0"
-           data-hostname="${hostname}"
-           data-shortcut-index="${index}"
-           alt="${name}">
-      <div class="shortcut-icon-fallback${multiClass}" style="display: none;">${iconText}</div>
-    `;
-  },
-  
-  // 初始化图标加载逻辑（cache-first）
-  async initMultiSourceIcons() {
-    if (typeof API === 'undefined' || !API.faviconLoader) return;
-    const images = document.querySelectorAll('.shortcut-icon-img[data-page-url]');
-    await API.faviconLoader.applyToImages(images);
-  },
-  
-  // 初始化书签图标加载逻辑（cache-first）
-  async initBookmarkIcons() {
-    if (typeof API === 'undefined' || !API.faviconLoader) return;
-    const images = document.querySelectorAll('.bookmark-icon-img[data-page-url]');
-    await API.faviconLoader.applyToImages(images);
+  // 增量加载图标 - 批量并行加载，不阻塞页面
+  async loadIconsIncrementally() {
+    // 使用 requestIdleCallback 在浏览器空闲时加载图标
+    const loadBatch = async (images, batchSize = 5, delay = 200) => {
+      for (let i = 0; i < images.length; i += batchSize) {
+        const batch = images.slice(i, i + batchSize);
+        await API.faviconLoader?.applyToImages(batch);
+
+        // 批次之间短暂延迟，避免阻塞主线程
+        if (i + batchSize < images.length) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    };
+
+    // 使用 requestIdleCallback 在浏览器空闲时开始加载
+    const startLoading = () => {
+      const shortcutImages = document.querySelectorAll('.shortcut-icon-img[data-page-url]');
+      const bookmarkImages = document.querySelectorAll('.bookmark-icon-img[data-page-url]');
+
+      // 优先加载快捷方式图标
+      loadBatch(Array.from(shortcutImages), 5, 100);
+
+      // 延迟加载书签图标
+      setTimeout(() => {
+        loadBatch(Array.from(bookmarkImages), 5, 100);
+      }, 500);
+    };
+
+    // 检查浏览器是否支持 requestIdleCallback
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(() => startLoading(), { timeout: 2000 });
+    } else {
+      // 不支持则延迟执行
+      setTimeout(() => startLoading(), 100);
+    }
   },
   
   // 将图标转换为数据URL并缓存

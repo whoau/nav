@@ -239,7 +239,7 @@ const API = {
     NEGATIVE_CACHE_KEY: 'iconNegativeCache',
 
     ICON_DATA_TTL: 30 * 24 * 60 * 60 * 1000, // 30天
-    NEGATIVE_TTL: 24 * 60 * 60 * 1000, // 24小时
+    NEGATIVE_TTL: 6 * 60 * 60 * 1000, // 6小时
 
     // 获取域名的首选图标源（历史兼容，当前已不再依赖多源索引）
     async getPreferredSource(hostname) {
@@ -413,6 +413,9 @@ const API = {
     _getApiFallbackUrls(hostname) {
       const safeHost = encodeURIComponent(hostname);
       return [
+        `https://www.google.com/s2/favicons?domain=${safeHost}&sz=64`,
+        `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent('https://' + safeHost)}&size=64`,
+        `https://favicons.githubusercontent.com/${safeHost}`,
         `https://favicon.im/${safeHost}`,
         `https://icon.horse/icon/${safeHost}`
       ];
@@ -421,20 +424,33 @@ const API = {
     async _fetchAsDataUrl(url) {
       try {
         const res = await fetch(url, {
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(3000),
           credentials: 'omit',
           cache: 'no-store'
         });
         if (!res.ok) return null;
 
         const contentType = (res.headers.get('content-type') || '').toLowerCase();
-        const looksLikeIcon = url.toLowerCase().includes('favicon') || url.toLowerCase().endsWith('.ico');
-        const isImageResponse = contentType.startsWith('image/') || contentType.includes('icon') || (looksLikeIcon && contentType === 'application/octet-stream');
+        const looksLikeIcon = url.toLowerCase().includes('favicon') ||
+                             url.toLowerCase().endsWith('.ico') ||
+                             url.toLowerCase().includes('icon');
+        // 更宽松的 content-type 检查，支持各种变体
+        const isImageResponse = contentType.startsWith('image/') ||
+                              contentType.includes('icon') ||
+                              contentType.includes('octet-stream') ||
+                              contentType === 'application/x-icon' ||
+                              contentType === 'image/vnd.microsoft.icon' ||
+                              contentType === 'image/x-icon' ||
+                              (looksLikeIcon && (contentType === 'application/octet-stream' || !contentType));
         if (!isImageResponse) return null;
 
         const blob = await res.blob();
         if (!blob || blob.size === 0) return null;
         if (blob.size > 1024 * 1024) return null;
+
+        // 支持多种图片格式，包括 webp
+        const isImage = blob.type.startsWith('image/') || blob.type === 'application/octet-stream' || !blob.type;
+        if (!isImage) return null;
 
         // SVG 直接转 data URL；其他尽量缩放为 64x64 PNG 以减小缓存体积
         if (blob.type === 'image/svg+xml') {
@@ -490,7 +506,7 @@ const API = {
       const tryFetchHtml = async (target) => {
         try {
           const res = await fetch(target, {
-            signal: AbortSignal.timeout(6000),
+            signal: AbortSignal.timeout(3000),
             credentials: 'omit',
             cache: 'no-store',
             headers: {
@@ -553,7 +569,19 @@ const API = {
         return null;
       }
 
-      for (const iconUrl of candidates.slice(0, 5)) {
+      // 并行尝试前3个图标，加快速度
+      const results = await Promise.allSettled(
+        candidates.slice(0, 3).map(url => this._fetchAsDataUrl(url))
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          return result.value;
+        }
+      }
+
+      // 如果并行失败，逐个尝试剩余的
+      for (const iconUrl of candidates.slice(3)) {
         const dataUrl = await this._fetchAsDataUrl(iconUrl);
         if (dataUrl) return dataUrl;
       }
@@ -571,36 +599,49 @@ const API = {
         return null;
       }
 
-      // 1) 网站自身 favicon.ico（优先）
+      // 并行尝试三个来源，最快的优先返回
       const rootIconUrl = new URL('/favicon.ico', urlObj.origin).toString();
-      const rootData = await this._fetchAsDataUrl(rootIconUrl);
-      if (rootData) {
-        await API.iconCache.cacheIcon(hostname, rootData, { source: 'website-root' });
-        await API.iconCache.clearFailed(hostname);
-        return rootData;
-      }
-
-      // 2) 解析 HTML head 获取 favicon link
-      const headData = await this._tryHeadIcons(urlObj);
-      if (headData) {
-        await API.iconCache.cacheIcon(hostname, headData, { source: 'website-head' });
-        await API.iconCache.clearFailed(hostname);
-        return headData;
-      }
-
-      // 3) 不屏蔽的 Favicon API
       const apiUrls = this._getApiFallbackUrls(hostname);
-      for (const apiUrl of apiUrls) {
-        const apiData = await this._fetchAsDataUrl(apiUrl);
-        if (apiData) {
-          await API.iconCache.cacheIcon(hostname, apiData, { source: 'api' });
+
+      // 准备三个来源的 Promise
+      const sources = [
+        { name: 'root', promise: this._fetchAsDataUrl(rootIconUrl) },
+        { name: 'head', promise: this._tryHeadIcons(urlObj) },
+        { name: 'api', promise: this.tryAnyApi(apiUrls) }
+      ];
+
+      // 并行尝试所有来源
+      const results = await Promise.allSettled(
+        sources.map(source => source.promise)
+      );
+
+      // 按顺序查找成功的源（保持优先级：root > head > api）
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status === 'fulfilled' && result.value) {
+          await API.iconCache.cacheIcon(hostname, result.value, { source: sources[i].name });
           await API.iconCache.clearFailed(hostname);
-          return apiData;
+          return result.value;
         }
       }
 
-      // 4) 失败：写入负缓存，避免同页/刷新时随机变化
+      // 所有来源都失败：写入负缓存，避免同页/刷新时随机变化
       await API.iconCache.markFailed(hostname);
+      return null;
+    },
+
+    // 尝试任意一个 API 返回成功即可
+    async tryAnyApi(apiUrls) {
+      // 并行请求所有 API，取第一个成功的
+      const results = await Promise.allSettled(
+        apiUrls.map(url => this._fetchAsDataUrl(url))
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          return result.value;
+        }
+      }
       return null;
     },
 
@@ -731,7 +772,7 @@ const API = {
 
     for (const api of apis) {
       try {
-        const res = await fetch(api.url, { signal: AbortSignal.timeout(5000) });
+        const res = await fetch(api.url, { signal: AbortSignal.timeout(3000) });
         if (!res.ok) continue;
         const data = await res.json();
         const loc = api.parse(data);
