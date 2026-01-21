@@ -39,7 +39,8 @@ const Widgets = {
       });
     }
 
-    await this.loadWeather();
+    // 异步加载天气，不阻塞页面
+    this.loadWeather().catch(err => console.warn('天气加载失败:', err));
   },
 
   async loadWeather(forceNew = false) {
@@ -131,7 +132,8 @@ const Widgets = {
       });
     }
 
-    await this.loadProverb();
+    // 异步加载谚语，不阻塞页面
+    this.loadProverb().catch(err => console.warn('谚语加载失败:', err));
   },
 
   async loadProverb(forceNew = false) {
@@ -313,9 +315,7 @@ const Widgets = {
           `;
         }).join('');
 
-        if (typeof API !== 'undefined' && API.faviconLoader) {
-          API.faviconLoader.applyToImages(bookmarksList.querySelectorAll('.bookmark-icon-img[data-page-url]'));
-        }
+        // 图标将在 loadIconsIncrementally 中批量异步加载
       }
     };
 
