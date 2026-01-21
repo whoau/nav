@@ -967,7 +967,9 @@ const App = {
           url = 'https://' + url;
         }
 
-        const updatedShortcut = { name, url };
+        // 获取原始快捷方式，确保不丢失其他属性
+        const originalShortcut = shortcuts[editingIndex] || {};
+        const updatedShortcut = { ...originalShortcut, name, url };
 
         if (customIconData) {
           updatedShortcut.icon = customIconData;
@@ -984,7 +986,7 @@ const App = {
         }
 
         try {
-          // 更新快捷方式数组
+          // 更新快捷方式数组（只修改当前索引）
           shortcuts[editingIndex] = updatedShortcut;
           this.data.shortcuts = shortcuts;
           
