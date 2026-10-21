@@ -843,12 +843,16 @@ body {
 
 .weather-icon-wrap .fa-sun { color: #fbbf24; }
 .weather-icon-wrap .fa-cloud-sun { color: #fcd34d; }
+.weather-icon-wrap .fa-cloud-sun-rain { color: #93c5fd; }
 .weather-icon-wrap .fa-cloud { color: #94a3b8; }
 .weather-icon-wrap .fa-cloud-rain { color: #60a5fa; }
 .weather-icon-wrap .fa-cloud-showers-heavy { color: #3b82f6; }
+.weather-icon-wrap .fa-cloud-showers-water { color: #2563eb; }
+.weather-icon-wrap .fa-cloud-bolt { color: #facc15; }
 .weather-icon-wrap .fa-snowflake { color: #e0f2fe; }
 .weather-icon-wrap .fa-bolt { color: #facc15; }
 .weather-icon-wrap .fa-smog { color: #9ca3af; }
+.weather-icon-wrap .fa-wind { color: #cbd5e1; }
 
 .weather-info {
   flex: 1;

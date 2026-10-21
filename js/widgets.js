@@ -59,8 +59,11 @@ const Widgets = {
         this.location = await API.getLocation(forceNew);
       }
 
-      const weather = await API.getWeather(this.location.lat, this.location.lon, forceNew);
+      const weather = await API.getWeather(this.location, forceNew);
       if (!weather) throw new Error('获取天气失败');
+
+      const cityName = weather.city || this.location.city || this.location.province || '当前位置';
+      const windText = weather.windText || (weather.windSpeed != null ? `${weather.windSpeed}km/h` : '--');
 
       weatherContent.innerHTML = `
         <div class="weather-main">
@@ -72,24 +75,24 @@ const Widgets = {
             <div class="weather-condition">${weather.condition}</div>
             <div class="weather-location">
               <i class="fas fa-map-marker-alt"></i>
-              ${this.location.city}
+              ${cityName}
             </div>
           </div>
         </div>
         <div class="weather-details">
-          <div class="weather-detail-item">
+          <div class="weather-detail-item" title="湿度">
             <i class="fas fa-tint"></i>
             <span>${weather.humidity}%</span>
           </div>
-          <div class="weather-detail-item">
+          <div class="weather-detail-item" title="风速">
             <i class="fas fa-wind"></i>
-            <span>${weather.windSpeed}km/h</span>
+            <span>${windText}</span>
           </div>
         </div>
         ${weather.forecast?.length > 0 ? `
           <div class="weather-forecast">
             ${weather.forecast.map(day => `
-              <div class="forecast-day">
+              <div class="forecast-day" title="${day.condition || ''}">
                 <div class="day">${day.date}</div>
                 <i class="fas ${day.icon}"></i>
                 <div class="temp">${day.minTemp}°/${day.maxTemp}°</div>
@@ -102,8 +105,8 @@ const Widgets = {
       weatherContent.innerHTML = `
         <div class="weather-loading">
           <i class="fas fa-cloud-sun" style="font-size:24px;opacity:0.3;"></i>
-          <span>加载失败</span>
-          <button onclick="Widgets.loadWeather()" class="retry-btn">
+          <span>天气加载失败</span>
+          <button onclick="Widgets.loadWeather(true)" class="retry-btn">
             <i class="fas fa-redo"></i> 重试
           </button>
         </div>
