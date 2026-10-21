@@ -7,6 +7,12 @@ const MAX_SHOWN_HISTORY = 100; // 记录最多100张已展示的壁纸
 const LOCATION_CACHE_TTL = 12 * 60 * 60 * 1000;
 const WEATHER_CACHE_TTL = 15 * 60 * 1000;
 
+// Bing/MSN 天气客户端使用的公共 apikey（非官方公开 API，失效时会自动回退腾讯天气）
+const MSN_WEATHER_API_KEYS = [
+  'UhJ4G66OjyLbn9mXARgajXLiLw6V75sHnfpU60aJBB',
+  'j5i4gDqHL6nGYwx5wi5kRhXjtf2c5qgFX9fzfk0TOo'
+];
+
 const API = {
   // 壁纸库管理
   wallpaperLibrary: {
@@ -728,24 +734,47 @@ const API = {
       return cached;
     }
 
+    // 优先使用国内可直连的服务，海外服务仅作兜底（避免被墙导致定位失败）
     const apis = [
       {
-        url: 'https://ipapi.co/json/',
-        parse: d => ({ city: d.city || '未知', lat: parseFloat(d.latitude), lon: parseFloat(d.longitude) })
+        url: 'https://ipservice.ws.126.net/locate/api/getLocByIp',
+        parse: d => {
+          const r = d?.result;
+          if (!r) return null;
+          return {
+            city: (r.city || '').trim(),
+            province: (r.province || '').trim(),
+            lat: parseFloat(r.areaLat),
+            lon: parseFloat(r.areaLng)
+          };
+        }
       },
       {
-        url: 'http://ip-api.com/json/',
-        parse: d => ({ city: d.city || '未知', lat: parseFloat(d.lat), lon: parseFloat(d.lon) })
+        url: 'http://ip-api.com/json/?lang=zh-CN&fields=status,country,regionName,city,lat,lon',
+        parse: d => (d.status === 'success' ? {
+          city: (d.city || '').trim(),
+          province: (d.regionName || '').trim(),
+          lat: parseFloat(d.lat),
+          lon: parseFloat(d.lon)
+        } : null)
+      },
+      {
+        url: 'https://ipapi.co/json/',
+        parse: d => ({
+          city: (d.city || '').trim(),
+          province: (d.region || '').trim(),
+          lat: parseFloat(d.latitude),
+          lon: parseFloat(d.longitude)
+        })
       }
     ];
 
     for (const api of apis) {
       try {
-        const res = await fetch(api.url, { signal: AbortSignal.timeout(3000) });
+        const res = await fetch(api.url, { signal: AbortSignal.timeout(5000) });
         if (!res.ok) continue;
-        const data = await res.json();
-        const loc = api.parse(data);
-        if (loc.lat && loc.lon) {
+        const loc = api.parse(await res.json());
+        if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
           await Storage.set('locationCache', loc);
           await Storage.set('locationCacheTime', now);
           return loc;
@@ -757,16 +786,20 @@ const API = {
 
     if (cached) return cached;
 
-    const fallback = { city: '北京', lat: 39.9, lon: 116.4 };
+    const fallback = { city: '北京', province: '北京', lat: 39.9, lon: 116.4 };
     await Storage.set('locationCache', fallback);
     await Storage.set('locationCacheTime', now);
     return fallback;
   },
 
-  // 获取天气
-  async getWeather(lat, lon, forceNew = false) {
+  // 获取天气（腾讯天气优先，Open-Meteo 兜底）
+  async getWeather(location, forceNew = false) {
+    const { lat, lon } = location || {};
+    const city = (location?.city || '').trim();
+    const province = (location?.province || '').trim();
+
     const now = Date.now();
-    const cacheKey = `${Math.round(lat * 100) / 100},${Math.round(lon * 100) / 100}`;
+    const cacheKey = city || `${Math.round(lat * 100) / 100},${Math.round(lon * 100) / 100}`;
 
     const cached = await Storage.get('weatherCache');
     const cacheTime = await Storage.get('weatherCacheTime');
@@ -775,38 +808,289 @@ const API = {
       return cached.data;
     }
 
+    let weather = null;
+
+    // Bing 天气（MSN，主源）：国内可直连，返回中文天气现象
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      weather = await this.fetchBingWeather(lat, lon);
+    }
+
+    // 腾讯天气：Bing 失败时兜底
+    if (!weather && city) {
+      weather = await this.fetchTencentWeather(city, province);
+    }
+
+    // Open-Meteo：海外最终兜底
+    if (!weather && Number.isFinite(lat) && Number.isFinite(lon)) {
+      weather = await this.fetchOpenMeteoWeather(lat, lon);
+    }
+
+    if (weather) {
+      weather.city = city || weather.city || '';
+      await Storage.set('weatherCache', { key: cacheKey, data: weather });
+      await Storage.set('weatherCacheTime', now);
+      return weather;
+    }
+
+    return cached?.data || null;
+  },
+
+  // 去除行政区划后缀，兼容不同数据源的城市命名
+  stripAreaSuffix(name = '') {
+    return name
+      .replace(/(维吾尔自治区|壮族自治区|回族自治区|特别行政区|自治区|省|市)$/g, '')
+      .replace(/(地区|盟|自治州)$/g, '')
+      .trim();
+  },
+
+  getDateKey(date = new Date()) {
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0')
+    ].join('-');
+  },
+
+  // Bing 天气（MSN Weather，与 Bing 天气页同一接口）
+  async fetchBingWeather(lat, lon) {
+    for (const apikey of MSN_WEATHER_API_KEYS) {
+      try {
+        const url = 'https://api.msn.com/weather/overview'
+          + `?apikey=${encodeURIComponent(apikey)}`
+          + `&lat=${lat}&lon=${lon}&units=C&locale=zh-CN`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) continue;
+
+        const data = await res.json();
+        const detail = data?.value?.[0]?.responses?.[0]?.weather?.[0];
+        const current = detail?.current;
+        const temp = parseFloat(current?.temp);
+        if (!Number.isFinite(temp)) continue;
+
+        const isNight = current.daytime === 'n';
+        const condition = current.pvdrCap || current.cap || '未知';
+        const humidity = parseInt(current.rh, 10);
+        const windSpeed = parseFloat(current.windSpd);
+        const windText = current.pvdrWindDir && current.pvdrWindSpd
+          ? this.formatWindText(current.pvdrWindDir, current.pvdrWindSpd)
+          : (Number.isFinite(windSpeed) ? `${Math.round(windSpeed)}km/h` : '--');
+
+        return {
+          temp: Math.round(temp),
+          humidity: Number.isFinite(humidity) ? humidity : '--',
+          windText,
+          condition,
+          icon: this.getBingWeatherIcon(current.icon, condition, isNight),
+          forecast: this.parseBingForecast(detail?.forecast?.days)
+        };
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  },
+
+  parseBingForecast(days = []) {
+    const todayKey = this.getDateKey();
+
+    return (days || [])
+      .map(day => {
+        const daily = day?.daily?.day || {};
+        const night = day?.daily?.night || {};
+        const valid = String(day?.valid || day?.almanac?.valid || '').slice(0, 10);
+        const daySummaries = (daily.summaries || []).join('');
+        const nightSummaries = (night.summaries || []).join('');
+        const readTemp = (value, summaries, keyword) => {
+          const parsed = parseFloat(value);
+          if (Number.isFinite(parsed)) return parsed;
+          const matched = summaries.match(new RegExp(`${keyword}\\s*(-?\\d+)`));
+          return matched ? parseFloat(matched[1]) : NaN;
+        };
+
+        let maxTemp = readTemp(day?.tempHi ?? daily.tempHi, daySummaries, '最高气温');
+        let minTemp = readTemp(day?.tempLo ?? daily.tempLo, nightSummaries, '最低气温');
+
+        // 部分返回结构只带逐小时数据，用小时温度兜底
+        const hourlyTemps = (Array.isArray(day?.hourly) ? day.hourly : [])
+          .map(hour => parseFloat(hour?.temp))
+          .filter(Number.isFinite);
+        if (!Number.isFinite(maxTemp) && hourlyTemps.length) maxTemp = Math.max(...hourlyTemps);
+        if (!Number.isFinite(minTemp) && hourlyTemps.length) minTemp = Math.min(...hourlyTemps);
+
+        const condition = day?.pvdrCap || daily.pvdrCap || daily.cap || '';
+
+        return {
+          valid,
+          date: this.formatDate(valid),
+          maxTemp: Math.round(maxTemp),
+          minTemp: Math.round(minTemp),
+          condition,
+          icon: this.getBingWeatherIcon(day?.icon ?? daily.icon, condition, false)
+        };
+      })
+      .filter(day => day.valid && day.valid >= todayKey
+        && Number.isFinite(day.maxTemp) && Number.isFinite(day.minTemp))
+      .slice(0, 3)
+      .map(({ valid, ...rest }) => rest);
+  },
+
+  // MSN 天气图标（文字描述优先，数字代码兜底）
+  getBingWeatherIcon(icon, condition = '', isNight = false) {
+    const text = String(condition || '');
+    const has = re => re.test(text);
+
+    if (has(/雷/)) return 'fa-cloud-bolt';
+    if (has(/雨夹雪|冻雨/)) return 'fa-cloud-rain';
+    if (has(/雪|冰雹|冰粒/)) return 'fa-snowflake';
+    if (has(/暴雨|大雨|强阵雨/)) return 'fa-cloud-showers-heavy';
+    if (has(/雨|毛毛雨/)) return 'fa-cloud-rain';
+    if (has(/雾|霾|烟|沙|尘/)) return 'fa-smog';
+    if (has(/晴/)) {
+      if (has(/间|局部|转/)) return isNight ? 'fa-cloud-moon' : 'fa-cloud-sun';
+      return isNight ? 'fa-moon' : 'fa-sun';
+    }
+    if (has(/多云/)) return isNight ? 'fa-cloud-moon' : 'fa-cloud-sun';
+    if (has(/阴|云|覆盖/)) return 'fa-cloud';
+    if (has(/风/)) return 'fa-wind';
+
+    const code = parseInt(icon, 10);
+    if ([27, 31, 28, 32].includes(code)) return 'fa-moon';
+    if ([26, 30, 33].includes(code)) return 'fa-cloud-moon';
+    if ([29, 34].includes(code)) return 'fa-cloud';
+    const map = {
+      1: 'fa-sun',
+      2: 'fa-sun',
+      3: 'fa-cloud-sun',
+      4: 'fa-cloud',
+      5: 'fa-smog',
+      6: 'fa-smog',
+      7: 'fa-cloud-rain',
+      8: 'fa-cloud-rain',
+      9: 'fa-cloud-showers-heavy',
+      10: 'fa-cloud-rain',
+      11: 'fa-cloud-sun-rain',
+      12: 'fa-snowflake',
+      13: 'fa-snowflake',
+      14: 'fa-snowflake',
+      15: 'fa-cloud-rain',
+      16: 'fa-snowflake',
+      17: 'fa-cloud-bolt',
+      18: 'fa-cloud-bolt',
+      19: 'fa-smog',
+      20: 'fa-smog',
+      21: 'fa-cloud-rain',
+      22: 'fa-smog',
+      23: 'fa-cloud-showers-heavy',
+      24: 'fa-cloud',
+      25: 'fa-smog'
+    };
+    return map[code] || 'fa-cloud';
+  },
+
+  // 腾讯天气（wis.qq.com），国内可直连
+  async fetchTencentWeather(city, province = '') {
+    const candidates = [];
+    const addCandidate = (p, c) => {
+      if (!c) return;
+      const prov = p || c;
+      if (candidates.some(item => item.province === prov && item.city === c)) return;
+      candidates.push({ province: prov, city: c });
+    };
+
+    addCandidate(province, city);
+    addCandidate(this.stripAreaSuffix(province), this.stripAreaSuffix(city));
+
+    for (const item of candidates) {
+      try {
+        const url = 'https://wis.qq.com/weather/common'
+          + `?source=pc&weather_type=${encodeURIComponent('observe|forecast_24h')}`
+          + `&province=${encodeURIComponent(item.province)}`
+          + `&city=${encodeURIComponent(item.city)}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) continue;
+
+        const data = await res.json();
+        const observe = data?.data?.observe;
+        const temp = parseFloat(observe?.degree);
+        if (!Number.isFinite(temp)) continue;
+
+        const humidity = parseInt(observe.humidity, 10);
+
+        return {
+          temp: Math.round(temp),
+          humidity: Number.isFinite(humidity) ? humidity : '--',
+          windText: this.formatWindText(observe.wind_direction_name, observe.wind_power),
+          condition: observe.weather_short || observe.weather || '未知',
+          icon: this.getWeatherIconByCode(observe.weather_code),
+          forecast: this.parseTencentForecast(data?.data?.forecast_24h)
+        };
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  },
+
+  parseTencentForecast(forecast24h = {}) {
+    const todayKey = this.getDateKey();
+
+    return Object.values(forecast24h || {})
+      .filter(day => day?.time && day.time >= todayKey)
+      .sort((a, b) => a.time.localeCompare(b.time))
+      .slice(0, 3)
+      .map(day => ({
+        date: this.formatDate(day.time),
+        maxTemp: Math.round(parseFloat(day.max_degree)),
+        minTemp: Math.round(parseFloat(day.min_degree)),
+        condition: day.day_weather_short || day.day_weather || '',
+        icon: this.getWeatherIconByCode(day.day_weather_code)
+      }))
+      .filter(day => Number.isFinite(day.maxTemp) && Number.isFinite(day.minTemp));
+  },
+
+  formatWindText(direction, power) {
+    const dir = (direction || '').trim();
+    const level = (power || '').trim();
+    if (!level) return dir || '--';
+    const levelText = /级$/.test(level) ? level : `${level}级`;
+    return dir ? `${dir}${levelText}` : levelText;
+  },
+
+  // Open-Meteo（海外备用源）
+  async fetchOpenMeteoWeather(lat, lon) {
     try {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=3`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
       const data = await res.json();
 
-      if (!data.current) return cached?.data || null;
+      if (!data.current) return null;
 
-      const weather = {
+      return {
         temp: Math.round(data.current.temperature_2m),
         humidity: data.current.relative_humidity_2m,
-        windSpeed: Math.round(data.current.wind_speed_10m),
+        windText: `${Math.round(data.current.wind_speed_10m)}km/h`,
         condition: this.getWeatherCondition(data.current.weather_code),
         icon: this.getWeatherIcon(data.current.weather_code),
         forecast: data.daily?.time.slice(0, 3).map((date, i) => ({
           date: this.formatDate(date),
           maxTemp: Math.round(data.daily.temperature_2m_max[i]),
           minTemp: Math.round(data.daily.temperature_2m_min[i]),
+          condition: this.getWeatherCondition(data.daily.weather_code[i]),
           icon: this.getWeatherIcon(data.daily.weather_code[i])
         })) || []
       };
-
-      await Storage.set('weatherCache', { key: cacheKey, data: weather });
-      await Storage.set('weatherCacheTime', now);
-
-      return weather;
     } catch {
-      return cached?.data || null;
+      return null;
     }
   },
 
   formatDate(dateStr) {
-    const d = new Date(dateStr);
+    const [year, month, day] = String(dateStr).split('-').map(Number);
+    const d = Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)
+      ? new Date(year, month - 1, day)
+      : new Date(dateStr);
     const today = new Date();
     if (d.toDateString() === today.toDateString()) return '今天';
     const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
@@ -814,9 +1098,24 @@ const API = {
     return ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
   },
 
+  // WMO 天气代码（Open-Meteo）
   getWeatherCondition(code) {
-    const map = { 0:'晴', 1:'晴', 2:'多云', 3:'阴', 45:'雾', 51:'小雨', 61:'雨', 71:'雪', 80:'阵雨', 95:'雷暴' };
-    return map[code] || '未知';
+    if (code === 0) return '晴';
+    if (code === 1) return '晴间多云';
+    if (code === 2) return '多云';
+    if (code === 3) return '阴';
+    if (code === 45 || code === 48) return '雾';
+    if (code >= 51 && code <= 57) return '毛毛雨';
+    if (code === 61 || code === 63) return '雨';
+    if (code === 65) return '大雨';
+    if (code === 66 || code === 67) return '冻雨';
+    if (code === 71 || code === 73) return '雪';
+    if (code === 75 || code === 77) return '大雪';
+    if (code === 80 || code === 81) return '阵雨';
+    if (code === 82) return '强阵雨';
+    if (code === 85 || code === 86) return '阵雪';
+    if (code >= 95) return '雷阵雨';
+    return '未知';
   },
 
   getWeatherIcon(code) {
@@ -827,8 +1126,50 @@ const API = {
     if (code >= 51 && code <= 67) return 'fa-cloud-rain';
     if (code >= 71 && code <= 77) return 'fa-snowflake';
     if (code >= 80 && code <= 82) return 'fa-cloud-showers-heavy';
-    if (code >= 95) return 'fa-bolt';
+    if (code === 85 || code === 86) return 'fa-snowflake';
+    if (code >= 95) return 'fa-cloud-bolt';
     return 'fa-cloud';
+  },
+
+  // 中国气象局天气代码（腾讯天气）
+  getWeatherIconByCode(code) {
+    const c = String(code ?? '').trim().padStart(2, '0');
+    const map = {
+      '00': 'fa-sun',
+      '01': 'fa-cloud-sun',
+      '02': 'fa-cloud',
+      '03': 'fa-cloud-sun-rain',
+      '04': 'fa-cloud-bolt',
+      '05': 'fa-cloud-bolt',
+      '06': 'fa-cloud-rain',
+      '07': 'fa-cloud-rain',
+      '08': 'fa-cloud-rain',
+      '09': 'fa-cloud-showers-heavy',
+      '10': 'fa-cloud-showers-heavy',
+      '11': 'fa-cloud-showers-water',
+      '12': 'fa-cloud-showers-water',
+      '13': 'fa-snowflake',
+      '14': 'fa-snowflake',
+      '15': 'fa-snowflake',
+      '16': 'fa-snowflake',
+      '17': 'fa-snowflake',
+      '18': 'fa-smog',
+      '19': 'fa-cloud-rain',
+      '20': 'fa-wind',
+      '21': 'fa-cloud-rain',
+      '22': 'fa-cloud-rain',
+      '23': 'fa-cloud-showers-heavy',
+      '24': 'fa-cloud-showers-heavy',
+      '25': 'fa-cloud-showers-water',
+      '26': 'fa-snowflake',
+      '27': 'fa-snowflake',
+      '28': 'fa-snowflake',
+      '29': 'fa-smog',
+      '30': 'fa-wind',
+      '31': 'fa-wind',
+      '53': 'fa-smog'
+    };
+    return map[c] || 'fa-cloud';
   },
 
   // 电影推荐 - 真实API，带3小时缓存
