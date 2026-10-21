@@ -25,20 +25,25 @@
 
 定位结果新增 `province` 字段并缓存 12 小时。
 
-### 3. 天气改为腾讯天气优先
-`API.getWeather(location, forceNew)` 改为：
-1. 优先请求 `https://wis.qq.com/weather/common`（腾讯天气，国内直连、无需 Key），
-   使用中文城市名获取实时天气 + 未来 3 天预报，并返回中文天气现象。
-2. 城市名缺失或腾讯天气失败时，回退到 `api.open-meteo.com`。
+### 3. 天气改为 Bing 天气优先
+`API.getWeather(location, forceNew)` 的取数顺序：
+1. **Bing 天气**（`https://api.msn.com/weather/overview`，与 Bing/Windows 天气同一接口）：
+   按经纬度获取实时天气与未来 3 天预报，返回中文天气现象（如「以晴为主」「局部多云」）。
+   使用 MSN 客户端的公共 apikey，内置两个 Key 轮换；接口为微软未公开 API，失效时自动降级。
+2. **腾讯天气** `https://wis.qq.com/weather/common`：国内直连、无需 Key，Bing 失败时兜底。
+3. **Open-Meteo**：海外最终兜底。
+
+夜间晴/多云会显示月亮图标（`fa-moon` / `fa-cloud-moon`），其余天气按中文描述映射到对应 Font Awesome 图标。
 
 `js/widgets.js` 同步适配：
 - 传入完整的定位对象（含城市/省份）。
-- 风速展示兼容腾讯天气的「风向+风力」格式（如 `南风4-5级`），Open-Meteo 仍显示 `km/h`。
+- 风速展示兼容「风向+风力」格式（如 `南风4-5级`）和 `km/h`。
 - 天气预报项通过 `title` 展示天气现象。
 - 重试按钮会强制刷新定位与天气。
 
 ### 4. 权限声明
 `manifest.json` 增加：
+- `https://api.msn.com/*`
 - `https://wis.qq.com/*`
 - `https://ipservice.ws.126.net/*`
 

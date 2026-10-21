@@ -7,6 +7,12 @@ const MAX_SHOWN_HISTORY = 100; // 记录最多100张已展示的壁纸
 const LOCATION_CACHE_TTL = 12 * 60 * 60 * 1000;
 const WEATHER_CACHE_TTL = 15 * 60 * 1000;
 
+// Bing/MSN 天气客户端使用的公共 apikey（非官方公开 API，失效时会自动回退腾讯天气）
+const MSN_WEATHER_API_KEYS = [
+  'UhJ4G66OjyLbn9mXARgajXLiLw6V75sHnfpU60aJBB',
+  'j5i4gDqHL6nGYwx5wi5kRhXjtf2c5qgFX9fzfk0TOo'
+];
+
 const API = {
   // 壁纸库管理
   wallpaperLibrary: {
@@ -804,12 +810,17 @@ const API = {
 
     let weather = null;
 
-    // 腾讯天气：国内直连、无需 Key，且能返回中文天气现象
-    if (city) {
+    // Bing 天气（MSN，主源）：国内可直连，返回中文天气现象
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      weather = await this.fetchBingWeather(lat, lon);
+    }
+
+    // 腾讯天气：Bing 失败时兜底
+    if (!weather && city) {
       weather = await this.fetchTencentWeather(city, province);
     }
 
-    // Open-Meteo：海外源，仅在腾讯天气失败时使用
+    // Open-Meteo：海外最终兜底
     if (!weather && Number.isFinite(lat) && Number.isFinite(lon)) {
       weather = await this.fetchOpenMeteoWeather(lat, lon);
     }
@@ -830,6 +841,151 @@ const API = {
       .replace(/(维吾尔自治区|壮族自治区|回族自治区|特别行政区|自治区|省|市)$/g, '')
       .replace(/(地区|盟|自治州)$/g, '')
       .trim();
+  },
+
+  getDateKey(date = new Date()) {
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0')
+    ].join('-');
+  },
+
+  // Bing 天气（MSN Weather，与 Bing 天气页同一接口）
+  async fetchBingWeather(lat, lon) {
+    for (const apikey of MSN_WEATHER_API_KEYS) {
+      try {
+        const url = 'https://api.msn.com/weather/overview'
+          + `?apikey=${encodeURIComponent(apikey)}`
+          + `&lat=${lat}&lon=${lon}&units=C&locale=zh-CN`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) continue;
+
+        const data = await res.json();
+        const detail = data?.value?.[0]?.responses?.[0]?.weather?.[0];
+        const current = detail?.current;
+        const temp = parseFloat(current?.temp);
+        if (!Number.isFinite(temp)) continue;
+
+        const isNight = current.daytime === 'n';
+        const condition = current.pvdrCap || current.cap || '未知';
+        const humidity = parseInt(current.rh, 10);
+        const windSpeed = parseFloat(current.windSpd);
+        const windText = current.pvdrWindDir && current.pvdrWindSpd
+          ? this.formatWindText(current.pvdrWindDir, current.pvdrWindSpd)
+          : (Number.isFinite(windSpeed) ? `${Math.round(windSpeed)}km/h` : '--');
+
+        return {
+          temp: Math.round(temp),
+          humidity: Number.isFinite(humidity) ? humidity : '--',
+          windText,
+          condition,
+          icon: this.getBingWeatherIcon(current.icon, condition, isNight),
+          forecast: this.parseBingForecast(detail?.forecast?.days)
+        };
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  },
+
+  parseBingForecast(days = []) {
+    const todayKey = this.getDateKey();
+
+    return (days || [])
+      .map(day => {
+        const daily = day?.daily?.day || {};
+        const night = day?.daily?.night || {};
+        const valid = String(day?.valid || day?.almanac?.valid || '').slice(0, 10);
+        const daySummaries = (daily.summaries || []).join('');
+        const nightSummaries = (night.summaries || []).join('');
+        const readTemp = (value, summaries, keyword) => {
+          const parsed = parseFloat(value);
+          if (Number.isFinite(parsed)) return parsed;
+          const matched = summaries.match(new RegExp(`${keyword}\\s*(-?\\d+)`));
+          return matched ? parseFloat(matched[1]) : NaN;
+        };
+
+        let maxTemp = readTemp(day?.tempHi ?? daily.tempHi, daySummaries, '最高气温');
+        let minTemp = readTemp(day?.tempLo ?? daily.tempLo, nightSummaries, '最低气温');
+
+        // 部分返回结构只带逐小时数据，用小时温度兜底
+        const hourlyTemps = (Array.isArray(day?.hourly) ? day.hourly : [])
+          .map(hour => parseFloat(hour?.temp))
+          .filter(Number.isFinite);
+        if (!Number.isFinite(maxTemp) && hourlyTemps.length) maxTemp = Math.max(...hourlyTemps);
+        if (!Number.isFinite(minTemp) && hourlyTemps.length) minTemp = Math.min(...hourlyTemps);
+
+        const condition = day?.pvdrCap || daily.pvdrCap || daily.cap || '';
+
+        return {
+          valid,
+          date: this.formatDate(valid),
+          maxTemp: Math.round(maxTemp),
+          minTemp: Math.round(minTemp),
+          condition,
+          icon: this.getBingWeatherIcon(day?.icon ?? daily.icon, condition, false)
+        };
+      })
+      .filter(day => day.valid && day.valid >= todayKey
+        && Number.isFinite(day.maxTemp) && Number.isFinite(day.minTemp))
+      .slice(0, 3)
+      .map(({ valid, ...rest }) => rest);
+  },
+
+  // MSN 天气图标（文字描述优先，数字代码兜底）
+  getBingWeatherIcon(icon, condition = '', isNight = false) {
+    const text = String(condition || '');
+    const has = re => re.test(text);
+
+    if (has(/雷/)) return 'fa-cloud-bolt';
+    if (has(/雨夹雪|冻雨/)) return 'fa-cloud-rain';
+    if (has(/雪|冰雹|冰粒/)) return 'fa-snowflake';
+    if (has(/暴雨|大雨|强阵雨/)) return 'fa-cloud-showers-heavy';
+    if (has(/雨|毛毛雨/)) return 'fa-cloud-rain';
+    if (has(/雾|霾|烟|沙|尘/)) return 'fa-smog';
+    if (has(/晴/)) {
+      if (has(/间|局部|转/)) return isNight ? 'fa-cloud-moon' : 'fa-cloud-sun';
+      return isNight ? 'fa-moon' : 'fa-sun';
+    }
+    if (has(/多云/)) return isNight ? 'fa-cloud-moon' : 'fa-cloud-sun';
+    if (has(/阴|云|覆盖/)) return 'fa-cloud';
+    if (has(/风/)) return 'fa-wind';
+
+    const code = parseInt(icon, 10);
+    if ([27, 31, 28, 32].includes(code)) return 'fa-moon';
+    if ([26, 30, 33].includes(code)) return 'fa-cloud-moon';
+    if ([29, 34].includes(code)) return 'fa-cloud';
+    const map = {
+      1: 'fa-sun',
+      2: 'fa-sun',
+      3: 'fa-cloud-sun',
+      4: 'fa-cloud',
+      5: 'fa-smog',
+      6: 'fa-smog',
+      7: 'fa-cloud-rain',
+      8: 'fa-cloud-rain',
+      9: 'fa-cloud-showers-heavy',
+      10: 'fa-cloud-rain',
+      11: 'fa-cloud-sun-rain',
+      12: 'fa-snowflake',
+      13: 'fa-snowflake',
+      14: 'fa-snowflake',
+      15: 'fa-cloud-rain',
+      16: 'fa-snowflake',
+      17: 'fa-cloud-bolt',
+      18: 'fa-cloud-bolt',
+      19: 'fa-smog',
+      20: 'fa-smog',
+      21: 'fa-cloud-rain',
+      22: 'fa-smog',
+      23: 'fa-cloud-showers-heavy',
+      24: 'fa-cloud',
+      25: 'fa-smog'
+    };
+    return map[code] || 'fa-cloud';
   },
 
   // 腾讯天气（wis.qq.com），国内可直连
@@ -878,12 +1034,7 @@ const API = {
   },
 
   parseTencentForecast(forecast24h = {}) {
-    const today = new Date();
-    const todayKey = [
-      today.getFullYear(),
-      String(today.getMonth() + 1).padStart(2, '0'),
-      String(today.getDate()).padStart(2, '0')
-    ].join('-');
+    const todayKey = this.getDateKey();
 
     return Object.values(forecast24h || {})
       .filter(day => day?.time && day.time >= todayKey)
